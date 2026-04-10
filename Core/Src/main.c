@@ -169,8 +169,6 @@ int main(void)
 
     write_duty(duty);
 
-    // count = count + 1000;
-
     angle = angle - 0.01;
 
 

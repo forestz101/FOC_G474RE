@@ -1,0 +1,11 @@
+/.mxproject
+/CMakePresets.json
+/CMakeLists.txt
+/startup_stm32g474xx.s
+/STM32G474XX_FLASH.ld
+/Drivers/
+/cmake/
+/build/
+/Core/Src/Backup/
+/Core/Inc/Backup/
+/.idea
