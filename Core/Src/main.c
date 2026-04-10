@@ -21,16 +21,19 @@
 #include "adc.h"
 #include "comp.h"
 #include "dac.h"
+#include "dma.h"
 #include "fdcan.h"
 #include "hrtim.h"
 #include "opamp.h"
 #include "usart.h"
-#include "usb.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "calibration.h"
+#include "retarget.h"
+#include "motor_interface.h"
+#include "foc.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,7 +54,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+volatile uint32_t current_buf[2] = {0};
+volatile uint32_t current_ref_buf[2] = {0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,7 +66,21 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void start_hrtim(void)
+{
+  HAL_HRTIM_WaveformCounterStart_IT(&hhrtim1, HRTIM_TIMERID_MASTER);
+  HAL_HRTIM_WaveformCounterStart(&hhrtim1, HRTIM_TIMERID_TIMER_A | HRTIM_TIMERID_TIMER_B | HRTIM_TIMERID_TIMER_E);
+  HAL_HRTIM_WaveformOutputStart(&hhrtim1, HRTIM_OUTPUT_TA1 | HRTIM_OUTPUT_TB1 | HRTIM_OUTPUT_TE1);
+}
 
+void start_adc(void)
+{
+  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+  HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED);
+
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)current_ref_buf, 2);
+  HAL_ADC_Start_DMA(&hadc2, (uint32_t*)current_buf, 2);
+}
 /* USER CODE END 0 */
 
 /**
@@ -94,6 +112,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_ADC2_Init();
   MX_ADC3_Init();
@@ -107,8 +126,17 @@ int main(void)
   MX_OPAMP3_Init();
   MX_UART4_Init();
   MX_UART5_Init();
-  MX_USB_PCD_Init();
   /* USER CODE BEGIN 2 */
+  motor_interface_init();
+  start_hrtim();
+  uint16_t count = 0;
+  float angle = 0;
+  LL_GPIO_SetOutputPin(PHASE_EN_GPIO_Port, PHASE_EN_Pin);
+  HAL_Delay(100);
+
+  // motor_interface_set_reverse(1);
+
+  // calibrate_single_electrical_rev(1, 12, 100);
 
   /* USER CODE END 2 */
 
@@ -118,11 +146,36 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-    /* Smoke test: Toggle GPO1 pin */
-    LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
-    HAL_Delay(500);
-
     /* USER CODE BEGIN 3 */
+
+    // calibrate_single_electrical_rev(1, 12, 128);
+
+    // MotorSensorData data = motor_interface_get_data();
+    // if (data.valid) {
+    //   printf("Device Type %u Electrical Angle: %u\r\n", data.device_type, data.position);
+    // }
+
+    printf("Electrical Angle: %u\r\n", motor_interface_get_position());
+
+    // uint8_t *raw = get_raw_uart();
+    // printf("Raw UART: [0x%02X] [0x%02X] [0x%02X] [0x%02X]\r\n", raw[0], raw[1], raw[2], raw[3]);
+
+    LL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+    // __HAL_HRTIM_SETPERIOD(&hhrtim1,
+    //                   HRTIM_TIMERINDEX_TIMER_A,
+    //                   count);
+
+    const DutyABC_t duty = open_loop_step(1, 0, angle, 12);
+
+    write_duty(duty);
+
+    // count = count + 1000;
+
+    angle = angle - 0.01;
+
+
+    // LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
+    HAL_Delay(5);
   }
   /* USER CODE END 3 */
 }
@@ -143,10 +196,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSI48;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV4;
@@ -175,6 +227,11 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+// void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+// {
+//   motor_interface_process_rx_callback(huart);
+// }
+
 
 /* USER CODE END 4 */
 

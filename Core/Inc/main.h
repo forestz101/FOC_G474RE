@@ -41,7 +41,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "math.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -67,12 +67,34 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define GPO1_Pin LL_GPIO_PIN_13
-#define GPO1_GPIO_Port GPIOC
+#define LED1_Pin LL_GPIO_PIN_13
+#define LED1_GPIO_Port GPIOC
+#define VIN_Pin LL_GPIO_PIN_0
+#define VIN_GPIO_Port GPIOC
+#define CSC_VREF_Pin LL_GPIO_PIN_3
+#define CSC_VREF_GPIO_Port GPIOC
+#define CSC_VO_Pin LL_GPIO_PIN_0
+#define CSC_VO_GPIO_Port GPIOA
+#define CSA_VO_Pin LL_GPIO_PIN_1
+#define CSA_VO_GPIO_Port GPIOA
+#define CSA_VREF_Pin LL_GPIO_PIN_2
+#define CSA_VREF_GPIO_Port GPIOA
+#define V6V_Pin LL_GPIO_PIN_14
+#define V6V_GPIO_Port GPIOB
 #define PHASE_EN_Pin LL_GPIO_PIN_6
 #define PHASE_EN_GPIO_Port GPIOC
+#define E1_PWMC_Pin LL_GPIO_PIN_8
+#define E1_PWMC_GPIO_Port GPIOC
+#define A1_PWMB_Pin LL_GPIO_PIN_8
+#define A1_PWMB_GPIO_Port GPIOA
+#define B1_PWMA_Pin LL_GPIO_PIN_10
+#define B1_PWMA_GPIO_Port GPIOA
 #define UART_DE_Pin LL_GPIO_PIN_3
 #define UART_DE_GPIO_Port GPIOB
+#define UART_nRE_Pin LL_GPIO_PIN_4
+#define UART_nRE_GPIO_Port GPIOB
+#define GPO1_Pin LL_GPIO_PIN_9
+#define GPO1_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

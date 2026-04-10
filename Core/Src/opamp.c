@@ -226,3 +226,4 @@ void HAL_OPAMP_MspDeInit(OPAMP_HandleTypeDef* opampHandle)
 /* USER CODE BEGIN 1 */
 
 /* USER CODE END 1 */
+

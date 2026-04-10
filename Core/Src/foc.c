@@ -1,60 +1,170 @@
-//
-// Created by Forest on 2026-02-12.
-//
-
 #include "foc.h"
+#include <math.h>
 
-float ua, ub;
-float angle_el;
-float sint, cost;
-float a, b, c;
+#include "hrtim.h"
 
-float raw_to_electrical_angle(const uint16_t raw_angle, const uint16_t raw_offset) {
-    const float mech = (2.0f * PI_F) * ((float)(raw_angle - raw_offset) / 16384.0f);
-    const float elec = mech * 7;
-
-    return fmodf(elec, 2.0f * PI_F);
-}
-
-void set_pwm_compare(const int16_t Ua, const int16_t Ub, const int16_t Uc, const uint16_t half_period) {
-
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, Ua + half_period);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, Ub + half_period);
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, Uc + half_period);
-}
-
-void sin_cos_theta(const float angle, float *sin_theta, float *cos_theta) {
-    *sin_theta = sinf(angle);
-    *cos_theta = cosf(angle);
-}
-
-void inverse_park_transform(const float Uq, const float Ud,
-    const float sin_theta, const float cos_theta, float *u_alpha, float *u_beta) {
-    *u_alpha = Ud*cos_theta - Uq*sin_theta;
-    *u_beta = Uq*cos_theta - Ud*sin_theta;
-}
-
-void inverse_clarke_transform(const float u_alpha, const float u_beta, float *a, float *b, float *c) {
-    *a = u_alpha;
-    *b = (SQRT3_F * u_beta - u_alpha)/2;
-    *c = (-u_alpha - SQRT3_F * u_beta)/2;
-    // setPwm(Ua, Ub, Uc);
-}
-
-void open_loop_voltage(const float Uq, const float Ud, const float angle)
+void GetPhaseCurrents(PhaseCurrents_t *I, uint32_t current_data[2], uint32_t reference_data[2])
 {
-    sin_cos_theta(angle, &sint, &cost);
-    inverse_park_transform(Uq, Ud, sint, cost, &ua, &ub);
-    inverse_clarke_transform(ua, ub, &a, &b, &c);
-    set_pwm_compare(a, b, c, pwm_period/2);
+    // Convert ADC readings to voltages
+    float VrefA   = reference_data[0] * ADC_SCALE;
+    float VrefC   = reference_data[1] * ADC_SCALE;
+
+    float VsenseA = current_data[0] * ADC_SCALE;
+    float VsenseC = current_data[1] * ADC_SCALE;
+
+    // Compute currents
+    float Ia = (VsenseA - VrefA) / CC6922SG_SENS;
+    float Ic = (VsenseC - VrefC) / CC6922SG_SENS;
+
+    // Fix sign based on wiring orientation
+    Ia = -Ia;   // IP− → motor
+    // Ic stays positive (IP+ → motor)
+
+    // Clarke transform uses Ia and Ib, so compute Ib
+    float Ib = -(Ia + Ic);
+
+    I->Ia = Ia;
+    I->Ib = Ib;
 }
 
-void setPhaseVoltage(const float Uq, const float Ud, const float angle_el) {
-    float u_alpha = Ud*cos(angle_el) - Uq*sin(angle_el);
-    float u_beta = Uq*cos(angle_el) - Ud*sin(angle_el);
+// -------------------------
+// Clarke Transform
+// -------------------------
+AlphaBeta_t Clarke(const PhaseCurrents_t I)
+{
+    AlphaBeta_t out;
+    out.Ialpha = I.Ia;
+    out.Ibeta  = (I.Ia + 2.0f * I.Ib) * 0.57735026919f; // 1/sqrt(3)
+    return out;
+}
 
-    const uint32_t Ua = u_alpha + Uq/2;
-    const uint32_t Ub = (sqrt(3) * u_beta-u_alpha)/2 + Uq/2;
-    const uint32_t Uc = (-u_alpha - sqrt(3) * u_beta)/2 + Uq/2;
-    set_pwm_compare(Ua, Ub, Uc, 0);
+// -------------------------
+// Park Transform
+// -------------------------
+void Park(AlphaBeta_t Iab, float angle, float *Id, float *Iq)
+{
+    float s = sinf(angle);
+    float c = cosf(angle);
+
+    *Id =  Iab.Ialpha * c + Iab.Ibeta * s;
+    *Iq = -Iab.Ialpha * s + Iab.Ibeta * c;
+}
+
+// -------------------------
+// Inverse Park
+// -------------------------
+VoltAlphaBeta_t InvPark(float Ud, float Uq, float angle)
+{
+    VoltAlphaBeta_t out;
+
+    float s = sinf(angle);
+    float c = cosf(angle);
+
+    out.Valpha = Ud * c - Uq * s;
+    out.Vbeta  = Ud * s + Uq * c;
+
+    return out;
+}
+
+// -------------------------
+// SVPWM
+// -------------------------
+DutyABC_t SVPWM(VoltAlphaBeta_t v, float Vbus)
+{
+    DutyABC_t d;
+
+    float X = v.Vbeta;
+    float Y = (0.8660254f * v.Valpha - 0.5f * v.Vbeta);
+    float Z = (-0.8660254f * v.Valpha - 0.5f * v.Vbeta);
+
+    float Tmax = fmaxf(fmaxf(X, Y), Z);
+    float Tmin = fminf(fminf(X, Y), Z);
+
+    float offset = 0.5f * (Tmax + Tmin);
+
+    d.Ta = (X - offset) / Vbus + 0.5f;
+    d.Tb = (Y - offset) / Vbus + 0.5f;
+    d.Tc = (Z - offset) / Vbus + 0.5f;
+
+    return d;
+}
+
+// -------------------------
+// PI Controller
+// -------------------------
+float PI_Run(PI_t *pi, float error, float dt)
+{
+    pi->integrator += pi->Ki * error * dt;
+
+    if (pi->integrator > pi->out_max) pi->integrator = pi->out_max;
+    if (pi->integrator < pi->out_min) pi->integrator = pi->out_min;
+
+    float out = pi->Kp * error + pi->integrator;
+
+    if (out > pi->out_max) out = pi->out_max;
+    if (out < pi->out_min) out = pi->out_min;
+
+    return out;
+}
+
+// -------------------------
+// Main FOC Step
+// -------------------------
+void FOC_Step(
+    PhaseCurrents_t I,
+    float Vbus,
+    AngleProvider_t getAngle,
+    PI_t *pi_d,
+    PI_t *pi_q,
+    FOC_Commands_t *cmd,
+    float dt)
+{
+    float angle = getAngle();
+
+    AlphaBeta_t Iab = Clarke(I);
+
+    float Id, Iq;
+    Park(Iab, angle, &Id, &Iq);
+
+    float err_d = cmd->Id_ref - Id;
+    float err_q = cmd->Iq_ref - Iq;
+
+    cmd->Ud = PI_Run(pi_d, err_d, dt);
+    cmd->Uq = PI_Run(pi_q, err_q, dt);
+
+    VoltAlphaBeta_t Vab = InvPark(cmd->Ud, cmd->Uq, angle);
+
+    DutyABC_t d = SVPWM(Vab, Vbus);
+
+    // Hardware write is done outside this module
+    // (HRTIM, TIM1, etc.)
+}
+
+DutyABC_t open_loop_step(float Ud, float Uq, float angle, float Vbus)
+{
+    VoltAlphaBeta_t Vab = InvPark(Ud, Uq, angle);
+
+    DutyABC_t d = SVPWM(Vab, Vbus);
+
+    return d;
+}
+
+void write_duty(const DutyABC_t duty)
+{
+    uint16_t counta = duty.Ta * 59999;
+    uint16_t countb = duty.Tb * 59999;
+    uint16_t countc = duty.Tc * 59999;
+
+    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
+                      HRTIM_TIMERINDEX_TIMER_B,
+                      HRTIM_COMPAREUNIT_1,
+                      counta);
+    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
+                      HRTIM_TIMERINDEX_TIMER_A,
+                      HRTIM_COMPAREUNIT_1,
+                      countb);
+    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
+                      HRTIM_TIMERINDEX_TIMER_E,
+                      HRTIM_COMPAREUNIT_1,
+                      countc);
 }
