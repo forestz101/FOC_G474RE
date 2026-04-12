@@ -22,6 +22,9 @@
 #include "stm32g4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdlib.h>
+#include "foc.h"
+#include "stm32g4xx_ll_hrtim.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,6 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define UART_RX_BUF_SIZE 64
 
 /* USER CODE END PD */
 
@@ -41,7 +45,9 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
+static char rxbuf[UART_RX_BUF_SIZE];
+static uint8_t idx = 0;
+volatile float commanded_position_deg = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -51,13 +57,18 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void process_uart_command(const char *cmd)
+{
+  if (cmd[0] == 'p' || cmd[0] == 'P')
+  {
+    commanded_position_deg = atof(&cmd[1]);
+    return;
+  }
+}
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern DMA_HandleTypeDef hdma_adc1;
-extern DMA_HandleTypeDef hdma_adc2;
-extern DMA_HandleTypeDef hdma_uart5_rx;
+extern HRTIM_HandleTypeDef hhrtim1;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -201,29 +212,37 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief This function handles DMA1 channel1 global interrupt.
+  * @brief This function handles HRTIM master timer global interrupt.
   */
-void DMA1_Channel1_IRQHandler(void)
+void HRTIM1_Master_IRQHandler(void)
 {
-  /* USER CODE BEGIN DMA1_Channel1_IRQn 0 */
+  /* USER CODE BEGIN HRTIM1_Master_IRQn 0 */
+  // Clear the Master Update interrupt flag
+  __HAL_HRTIM_MASTER_CLEAR_IT(&hhrtim1, HRTIM_MASTER_IT_MUPD);
 
-  /* USER CODE END DMA1_Channel1_IRQn 0 */
-  /* USER CODE BEGIN DMA1_Channel1_IRQn 1 */
+  // 1. Read latest ADC currents (DMA already updated these)
+  PhaseCurrents_t I;
+  GetPhaseCurrents(&I, current_buf, current_ref_buf);
 
-  /* USER CODE END DMA1_Channel1_IRQn 1 */
-}
+  // 2. Read rotor electrical angle
+  // float angle = 0;
 
-/**
-  * @brief This function handles DMA1 channel2 global interrupt.
-  */
-void DMA1_Channel2_IRQHandler(void)
-{
-  /* USER CODE BEGIN DMA1_Channel2_IRQn 0 */
+  // 3. Run FOC
+  FOC_Step(
+      I,
+      30,
+      angle,
+      &pi_d,
+      &pi_q,
+      &foc_cmd,
+      CONTROL_DT   // dt = 1 / PWM frequency
+  );
 
-  /* USER CODE END DMA1_Channel2_IRQn 0 */
-  /* USER CODE BEGIN DMA1_Channel2_IRQn 1 */
+  /* USER CODE END HRTIM1_Master_IRQn 0 */
+  HAL_HRTIM_IRQHandler(&hhrtim1,HRTIM_TIMERINDEX_MASTER);
+  /* USER CODE BEGIN HRTIM1_Master_IRQn 1 */
 
-  /* USER CODE END DMA1_Channel2_IRQn 1 */
+  /* USER CODE END HRTIM1_Master_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

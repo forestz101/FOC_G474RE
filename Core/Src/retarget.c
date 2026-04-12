@@ -4,7 +4,7 @@
 #include <errno.h>
 
 // Retarget _write to UART4 for printf output
-extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart4;
 
 int _write(int file, char *ptr, int len)
 {

@@ -3,7 +3,57 @@
 
 #include "hrtim.h"
 
-void GetPhaseCurrents(PhaseCurrents_t *I, uint32_t current_data[2], uint32_t reference_data[2])
+float Vbus = 30;
+float angle = 0;
+
+FOC_Commands_t foc_cmd = {
+    .Id_ref = 0.0f,
+    .Iq_ref = 0.0f,
+    .Ud = 0.0f,
+    .Uq = 0.0f
+};
+
+PI_t pi_d = {
+    .Kp = 0.1f,
+    .Ki = 0.0f,
+    .integrator = 0.0f,
+    .out_min = 0.0f,    // set in init
+    .out_max = 0.0f     // set in init
+};
+
+PI_t pi_q = {
+    .Kp = 0.1f,
+    .Ki = 0.0f,
+    .integrator = 0.0f,
+    .out_min = 0.0f,    // set in init
+    .out_max = 0.0f     // set in init
+};
+
+PhaseCurrents_t phase_currents = {
+    .Ia = 0.0f,
+    .Ib = 0.0f,
+    .Ic = 0.0f
+};
+
+// PhaseCurrents_t phase_currents;
+volatile uint16_t current_buf[2] = {0}; // [CSA, CSC]
+volatile uint16_t current_ref_buf[2] = {0}; // [CSA REF, CSC REF]
+
+void foc_init(volatile float vbus)
+{
+    Vbus = vbus;
+
+    pi_d.out_min = -Vbus;
+    pi_d.out_max =  Vbus;
+
+    pi_q.out_min = -Vbus;
+    pi_q.out_max =  Vbus;
+
+    foc_cmd.Id_ref = 5.0f;
+    foc_cmd.Iq_ref = 0.0f;
+}
+
+void GetPhaseCurrents(PhaseCurrents_t *I, uint16_t current_data[2], uint16_t reference_data[2])
 {
     // Convert ADC readings to voltages
     float VrefA   = reference_data[0] * ADC_SCALE;
@@ -16,15 +66,16 @@ void GetPhaseCurrents(PhaseCurrents_t *I, uint32_t current_data[2], uint32_t ref
     float Ia = (VsenseA - VrefA) / CC6922SG_SENS;
     float Ic = (VsenseC - VrefC) / CC6922SG_SENS;
 
-    // Fix sign based on wiring orientation
     Ia = -Ia;   // IP− → motor
+    // Ic = -Ic;
     // Ic stays positive (IP+ → motor)
 
     // Clarke transform uses Ia and Ib, so compute Ib
-    float Ib = -(Ia + Ic);
+    const float Ib = -(Ia + Ic);
 
     I->Ia = Ia;
     I->Ib = Ib;
+    I->Ic = Ic;
 }
 
 // -------------------------
@@ -113,18 +164,18 @@ float PI_Run(PI_t *pi, float error, float dt)
 void FOC_Step(
     PhaseCurrents_t I,
     float Vbus,
-    AngleProvider_t getAngle,
+    float angle,
     PI_t *pi_d,
     PI_t *pi_q,
     FOC_Commands_t *cmd,
     float dt)
 {
-    float angle = getAngle();
+    // float angle = getAngle();
 
     AlphaBeta_t Iab = Clarke(I);
 
     float Id, Iq;
-    Park(Iab, angle, &Id, &Iq);
+    Park(Iab, 0, &Id, &Iq);
 
     float err_d = cmd->Id_ref - Id;
     float err_q = cmd->Iq_ref - Iq;
@@ -132,9 +183,11 @@ void FOC_Step(
     cmd->Ud = PI_Run(pi_d, err_d, dt);
     cmd->Uq = PI_Run(pi_q, err_q, dt);
 
-    VoltAlphaBeta_t Vab = InvPark(cmd->Ud, cmd->Uq, angle);
+    VoltAlphaBeta_t Vab = InvPark(cmd->Ud, cmd->Uq, 0);
 
     DutyABC_t d = SVPWM(Vab, Vbus);
+
+    write_duty(d);
 
     // Hardware write is done outside this module
     // (HRTIM, TIM1, etc.)

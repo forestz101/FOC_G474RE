@@ -26,21 +26,14 @@ extern "C" {
 #include "main.h"
 #include "usart.h"
 
-// typedef struct {
-//   uint16_t position;
-//   uint16_t temperature;
-//   uint8_t device_type;
-//   uint8_t message_type;  // 0=device type packet, 1=temp+position packet
-//   uint8_t valid;         // 1 if data is valid, 0 if not
-// } MotorSensorData;
-//
-// void motor_interface_init(void);
-// uint8_t *get_raw_uart(void);
-// MotorSensorData motor_interface_get_data(void);
-// void motor_interface_process_rx_callback(UART_HandleTypeDef *huart);
-#define ENCODER_BITS     13
+#define ENCODER_BITS     14
 #define ENCODER_COUNTS   (1U << ENCODER_BITS)   // 8192
 #define ENCODER_MASK     (ENCODER_COUNTS - 1U)  // 0x1FFF
+#define WS22_DMA_BUF_SIZE 128  // power of 2 (e.g., 64, 128, 256)
+#define LUT_SIZE 64
+#define POLE_PAIRS 1
+#define CAL_SAMPLES (LUT_SIZE * POLE_PAIRS)
+#define CALIB_FLASH_ADDR  0x0807F800  // last flash page G474RE
 
 typedef struct {
   uint16_t position;
@@ -49,11 +42,17 @@ typedef struct {
   uint8_t  valid;
 } MotorSensorData;
 
+extern volatile float commanded_position_deg;
+
 void motor_interface_init(void);
 uint16_t motor_interface_get_position(void);
+uint16_t motor_interface_get_position_raw(void);
 MotorSensorData motor_interface_get_data(void);
 void motor_interface_set_offset(uint16_t off);
 void motor_interface_set_reverse(uint8_t rev);
+void motor_interface_set_lut(const int16_t *lut);
+void motor_interface_load_calibration(void);
+void motor_interface_save_calibration(void);
 
 #ifdef __cplusplus
 }

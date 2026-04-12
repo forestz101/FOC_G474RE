@@ -8,75 +8,174 @@
 #include <math.h>
 #include <stdio.h>
 
-#define M_PI 3.14159265358979323846f
-
 float calibrate_counts_to_angle(uint16_t counts)
 {
-    const float scale = (2.0f * M_PI) / (float)ENCODER_COUNTS;
+    const float scale = (2.0f * PI_F) / (float)ENCODER_COUNTS;
     return (float)counts * scale;
 }
 
-uint16_t calibrate_single_electrical_rev(float Ud, float Vbus, int steps)
+int16_t wrap_diff(int32_t diff)
 {
-    int32_t min_off_counts =  1000000;
-    int32_t max_off_counts = -1000000;
-    int64_t sum_off_counts =  0;
+    // Bring into [0, ENCODER_COUNTS)
+    diff %= ENCODER_COUNTS;
+    if (diff < 0)
+        diff += ENCODER_COUNTS;
 
-    for (int i = 0; i < steps; i++)
+    // Now map to [-ENCODER_COUNTS/2, +ENCODER_COUNTS/2)
+    if (diff > (ENCODER_COUNTS / 2))
+        diff -= ENCODER_COUNTS;
+
+    return (int16_t)diff;
+}
+
+void calibrate_offset(const float Ud, const float Vbus)
+{
+    printf("\r\n=== BEGIN OFFSET CALIBRATION ===\r\n");
+
+    int32_t offset_sum = 0;
+    int16_t offset = 0;
+
+    for (int i = 0; i < POLE_PAIRS; i++)
     {
-        // Commanded electrical angle
-        float theta_cmd = (2.0f * M_PI * (float)i) / (float)steps;
+        for (int j = 0; j < 129; j++)
+        {
+            float theta_elec = (2.0f * PI_F * j) / 128;
+            DutyABC_t d = open_loop_step(Ud, 0.0f, theta_elec, Vbus);
+            write_duty(d);
+            HAL_Delay(5);
+        }
+        HAL_Delay(1000);
+        uint16_t raw = motor_interface_get_position_raw();
 
-        // Apply open-loop d-axis voltage at theta_cmd
-        DutyABC_t d = open_loop_step(Ud, 0.0f, theta_cmd, Vbus);
-        write_duty(d);
+        if (raw > ENCODER_COUNTS/2)
+        {
+            offset = raw - ENCODER_COUNTS;
+        } else
+        {
+            offset = raw;
+        }
 
-        HAL_Delay(500); // let rotor settle
+        offset_sum += offset;
+        printf("Electrical revolution %2d | Raw %4u, | Offset %4d\r\n", i, raw, offset);
 
-        // Read encoder raw counts (0..8191)
-        uint16_t raw = motor_interface_get_position();
-
-        // Convert commanded angle -> expected encoder count
-        float counts_per_rad = (float)ENCODER_COUNTS / (2.0f * M_PI);
-        uint16_t cmd_counts = (uint16_t)lroundf(theta_cmd * counts_per_rad);
-
-        // Signed offset in counts (raw difference, NO normalization)
-        int32_t off_counts = (int32_t)raw - (int32_t)cmd_counts;
-
-        // Wrap-aware normalization for 13-bit encoder
-        if (off_counts >  (ENCODER_COUNTS/2))  off_counts -= ENCODER_COUNTS;
-        if (off_counts < -(ENCODER_COUNTS/2))  off_counts += ENCODER_COUNTS;
-
-        // Track stats exactly as measured
-        if (off_counts < min_off_counts) min_off_counts = off_counts;
-        if (off_counts > max_off_counts) max_off_counts = off_counts;
-
-        sum_off_counts += off_counts;
-
-        printf("Step %d: Cmd angle %f rad, Cmd counts %u, Raw counts %u, Offset %ld counts\r\n",
-               i, theta_cmd, cmd_counts, raw, (long)off_counts);
     }
 
-    // Average offset in counts (signed)
-    int32_t avg_off_counts = (int32_t)(sum_off_counts / steps);
-
-    // Convert to unsigned 0..8191 for storage
-    uint16_t avg_off_counts_u =
-        (uint16_t)((avg_off_counts + ENCODER_COUNTS) & ENCODER_MASK);
-
-    // Convert to radians for display only
-    float rad_per_count = (2.0f * M_PI) / (float)ENCODER_COUNTS;
-    float min_off_rad = min_off_counts * rad_per_count;
-    float max_off_rad = max_off_counts * rad_per_count;
-    float avg_off_rad = avg_off_counts * rad_per_count;
-
-    printf("Encoder calibration (1 electrical rev):\r\n");
-    printf("  Min offset: %ld counts (%f rad)\r\n", (long)min_off_counts, min_off_rad);
-    printf("  Max offset: %ld counts (%f rad)\r\n", (long)max_off_counts, max_off_rad);
-    printf("  Avg offset: %ld counts (%f rad)\r\n", (long)avg_off_counts, avg_off_rad);
-    printf("  Peak-to-peak error: %ld counts (%f rad)\r\n",
-           (long)(max_off_counts - min_off_counts),
-           (max_off_rad - min_off_rad));
-
-    return avg_off_counts_u;
+    int16_t offset_avg = offset_sum / POLE_PAIRS;
+    printf("Average Offset = %+6d\r\n", offset_avg);
+    motor_interface_set_offset((offset_avg + ENCODER_COUNTS) & ENCODER_MASK);
 }
+
+void calibrate(const float Ud, const float Vbus)
+{
+    printf("\r\n=== BEGIN FULL MECHANICAL CALIBRATION ===\r\n");
+
+    uint16_t raw_samples[CAL_SAMPLES];
+    int16_t  diff_samples[CAL_SAMPLES];
+
+    // --- 1. Sweep full mechanical revolution ---
+    for (int i = 0; i < CAL_SAMPLES; i++)
+    {
+        // Electrical angle = 0 → 2π * POLE_PAIRS
+        float theta_elec = (2.0f * PI_F * POLE_PAIRS * i) / CAL_SAMPLES;
+
+        DutyABC_t d = open_loop_step(Ud, 0.0f, theta_elec, Vbus);
+        write_duty(d);
+        HAL_Delay(250);   // shorter delay OK with oversampling
+
+        uint16_t raw = motor_interface_get_position_raw();
+        raw_samples[i] = raw;
+
+        // // Mechanical angle for commanded position
+        // float theta_mech = (2.0f * PI_F * i) / CAL_SAMPLES;
+        // float cpr = (float)ENCODER_COUNTS / (2.0f * PI_F);
+        uint16_t cmd = (uint16_t)lroundf(theta_elec * (ENCODER_COUNTS / (2.0f * PI_F)));
+
+        int32_t diff32 = (int32_t)raw - (int32_t)cmd;
+        int16_t diff = wrap_diff(diff32);
+
+        diff_samples[i] = diff;
+
+        printf("Sample %4d | Raw %4u | Cmd %4u | Diff32 %6ld | Diff %+6d\r\n",
+               i, raw, cmd, diff32, diff);
+
+    }
+
+    // --- 2. Compute global offset ---
+    int32_t sum = 0;
+    for (int i = 0; i < CAL_SAMPLES; i++)
+        sum += diff_samples[i];
+    int16_t avg = sum / CAL_SAMPLES;
+    // motor_interface_set_offset((avg + ENCODER_COUNTS) & ENCODER_MASK);
+
+    printf("\r\nGlobal offset (avg diff) = %+6d\r\n", avg);
+
+    // --- 3. Compute residuals ---
+    int16_t residual[CAL_SAMPLES];
+    for (int i = 0; i < CAL_SAMPLES; i++)
+        residual[i] = diff_samples[i] - avg;
+
+    printf("\r\nResiduals computed.\r\n");
+
+    // --- 4. Re-bin oversampled data into LUT_SIZE bins ---
+    int16_t lut[LUT_SIZE];
+
+    printf("\r\n=== LUT RE-BINNING ===\r\n");
+
+    for (int bin = 0; bin < LUT_SIZE; bin++)
+    {
+        uint32_t raw_lo = (bin     * ENCODER_COUNTS) / LUT_SIZE;
+        uint32_t raw_hi = ((bin+1) * ENCODER_COUNTS) / LUT_SIZE;
+
+        int32_t acc = 0;
+        int count = 0;
+
+        for (int i = 0; i < CAL_SAMPLES; i++)
+        {
+            uint16_t r = raw_samples[i];
+
+            if (r >= raw_lo && r < raw_hi)
+            {
+                acc += residual[i];
+                count++;
+            }
+        }
+
+        if (count == 0)
+            lut[bin] = 0;
+        else
+            lut[bin] = acc / count;
+
+        printf("LUT[%3d] | raw_lo %4lu | raw_hi %4lu | count %3d | value %+6d\r\n",
+               bin, (unsigned long)raw_lo, (unsigned long)raw_hi, count, lut[bin]);
+    }
+
+    // --- 5. Store LUT ---
+    motor_interface_set_lut(lut);
+    motor_interface_save_calibration();
+
+    printf("\r\n=== CALIBRATION COMPLETE ===\r\n");
+    printf("Offset = %+6d counts\r\n", avg);
+}
+
+void calibrate_clear(void)
+{
+    printf("\r\n=== CLEAR CALIBRATION ===\r\n");
+
+    // 1. Zero offset
+    motor_interface_set_offset(0);
+
+    // 2. Zero LUT
+    int16_t lut[LUT_SIZE];
+    for (int i = 0; i < LUT_SIZE; i++)
+        lut[i] = 0;
+
+    motor_interface_set_lut(lut);
+
+    // 3. Save to flash
+    motor_interface_save_calibration();
+
+    printf("Offset cleared.\r\n");
+    printf("LUT cleared.\r\n");
+    printf("Calibration reset to identity.\r\n");
+}
+

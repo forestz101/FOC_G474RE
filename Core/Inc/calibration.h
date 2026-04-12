@@ -8,6 +8,8 @@
 #pragma once
 #include <stdint.h>
 
-uint16_t calibrate_single_electrical_rev(float Ud, float Vbus, int steps);
+void calibrate(float Ud, float Vbus);
+void calibrate_offset(const float Ud, const float Vbus);
+void calibrate_clear(void);
 
 #endif //FOC_G474RE_CALIBRATION_H

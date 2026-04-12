@@ -20,6 +20,9 @@
 // CC6922SG sensitivity
 #define CC6922SG_SENS 0.0132f   // 13.2 mV/A
 
+// Control loop period length
+#define CONTROL_DT (1.0f / 22667.0f)
+
 #include "main.h"
 // #include "tim.h"
 #ifndef FOC_H
@@ -64,10 +67,22 @@ typedef struct {
     float Uq;
 } FOC_Commands_t;
 
+extern volatile uint16_t current_buf[2]; // [CSA, CSC]
+extern volatile uint16_t current_ref_buf[2]; // [CSA REF, CSC REF]
+extern PhaseCurrents_t phase_currents;
+extern float vbus;
+extern PI_t pi_d;
+extern PI_t pi_q;
+extern FOC_Commands_t foc_cmd;
+
+extern float angle;
+
 // Angle provider function pointer
 typedef float (*AngleProvider_t)(void);
 
 // Public API
+void foc_init(volatile float Vbus);
+void GetPhaseCurrents(PhaseCurrents_t *I, uint16_t current_data[2], uint16_t reference_data[2]);
 AlphaBeta_t Clarke(PhaseCurrents_t I);
 void Park(AlphaBeta_t Iab, float angle, float *Id, float *Iq);
 VoltAlphaBeta_t InvPark(float Ud, float Uq, float angle);
@@ -79,7 +94,7 @@ float PI_Run(PI_t *pi, float error, float dt);
 void FOC_Step(
     PhaseCurrents_t I,
     float Vbus,
-    AngleProvider_t getAngle,
+    float angle,
     PI_t *pi_d,
     PI_t *pi_q,
     FOC_Commands_t *cmd,

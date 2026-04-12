@@ -23,28 +23,24 @@
 #include "stm32g4xx_ll_usart.h"
 #include "stm32g4xx_ll_dma.h"
 
-// Bit masks and constants for WaveSculptor protocol
-#define MASK_7B           0x7F  // 7-bit mask for data bytes (bits 0-6)
-#define MASK_6B           0x3F  // 6-bit mask for device type/temperature MSB
-#define SYNC_BIT_MASK     0x80  // Bit 7 set indicates start of packet
-#define MSG_TYPE_MASK     0xC0  // Bits 7-6 contain message type
-#define MSG_TYPE_DEVICE   0x80  // 0b10 << 6: Device type packet
-#define MSG_TYPE_TEMP_POS 0xC0  // 0b11 << 6: Temperature + position packet
-
-// // Private variables for UART handling
-// static uint8_t rxBuf[4];
-// static uint8_t rxByte;
-// static uint32_t frameIndex = 0;  // Position in frame (0-3)
-// static uint32_t syncErrors = 0;
-// static uint32_t validPackets = 0;
-// static uint32_t debugMode = 0;  // Debug mode flag - enabled by default
-// static MotorSensorData currentData = {0};
-#define WS22_DMA_BUF_SIZE 128  // power of 2 (e.g., 64, 128, 256)
-
 static uint8_t  ws22_dma_buf[WS22_DMA_BUF_SIZE];
 static MotorSensorData currentData = {0};
 static uint16_t encoder_offset = 0;
 static uint8_t reverse_direction = 0;
+static int16_t encoder_lut[LUT_SIZE] = {0};
+static uint8_t lut_valid = 0;
+
+#include "stm32g4xx_hal.h"
+
+
+typedef struct {
+  uint16_t offset;
+  uint8_t  reverse;
+  uint8_t  lut_valid;
+  int16_t  lut[LUT_SIZE];
+} EncoderCalData;
+
+static int16_t encoder_lut[LUT_SIZE];
 
 /**
   * @brief  Initialize motor interface
@@ -59,6 +55,8 @@ void motor_interface_init(void)
   LL_DMA_DisableIT_HT(DMA1, LL_DMA_CHANNEL_3);
   LL_DMA_DisableIT_TC(DMA1, LL_DMA_CHANNEL_3);
   LL_DMA_DisableIT_TE(DMA1, LL_DMA_CHANNEL_3);
+
+  // motor_interface_load_calibration();
 }
 
 static inline uint32_t ws22_dma_write_index(void)
@@ -121,6 +119,18 @@ static void ws22_parse_latest_frame(void)
   }
 }
 
+static void apply_calibration(const EncoderCalData *cal)
+{
+  encoder_offset   = cal->offset & ENCODER_MASK;
+  reverse_direction = cal->reverse ? 1 : 0;
+  lut_valid        = cal->lut_valid ? 1 : 0;
+
+  // if (lut_valid) {
+  //   for (int i = 0; i < LUT_SIZE; i++)
+  //     encoder_lut[i] = cal->lut[i];
+  // }
+}
+
 void motor_interface_set_offset(uint16_t off)
 {
   encoder_offset = off & ENCODER_MASK;
@@ -131,126 +141,109 @@ void motor_interface_set_reverse(uint8_t rev)
   reverse_direction = rev ? 1 : 0;
 }
 
+void motor_interface_set_lut(const int16_t *lut)
+{
+  for (int i = 0; i < LUT_SIZE; i++)
+    encoder_lut[i] = lut[i];
+
+  lut_valid = 1;
+}
+
+void motor_interface_load_calibration(void)
+{
+  const EncoderCalData *cal = (const EncoderCalData *)CALIB_FLASH_ADDR;
+
+  // Very simple validity check: lut_valid must be 0 or 1, reverse 0 or 1
+  if (cal->lut_valid <= 1 && cal->reverse <= 1) {
+    apply_calibration(cal);
+  }
+}
+
+void motor_interface_save_calibration(void)
+{
+  EncoderCalData cal;
+
+  cal.offset    = encoder_offset;
+  cal.reverse   = reverse_direction;
+  cal.lut_valid = lut_valid;
+
+  for (int i = 0; i < LUT_SIZE; i++)
+    cal.lut[i] = encoder_lut[i];
+
+  HAL_FLASH_Unlock();
+
+  // Erase one page
+  FLASH_EraseInitTypeDef erase = {0};
+  uint32_t pageError = 0;
+
+  erase.TypeErase   = FLASH_TYPEERASE_PAGES;
+  erase.Page        = (CALIB_FLASH_ADDR - FLASH_BASE) / FLASH_PAGE_SIZE;
+  erase.NbPages     = 1;
+
+  if (HAL_FLASHEx_Erase(&erase, &pageError) != HAL_OK) {
+    HAL_FLASH_Lock();
+    return;
+  }
+
+  // Program as 64-bit double words
+  uint64_t *src = (uint64_t *)&cal;
+  uint32_t addr = CALIB_FLASH_ADDR;
+  uint32_t bytes = sizeof(EncoderCalData);
+
+  for (uint32_t i = 0; i < (bytes + 7) / 8; i++) {
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+                          addr,
+                          src[i]) != HAL_OK) {
+      break;
+                          }
+    addr += 8;
+  }
+
+  HAL_FLASH_Lock();
+}
 
 uint16_t motor_interface_get_position(void)
+{
+  ws22_parse_latest_frame();
+  uint16_t raw = currentData.position & ENCODER_MASK;
+
+  if (reverse_direction)
+    raw = (ENCODER_COUNTS - raw) & ENCODER_MASK;
+
+  raw = (raw - encoder_offset) & ENCODER_MASK;
+
+  if (lut_valid)
+  {
+    uint32_t idx  = raw >> 5;     // 256-entry LUT
+    uint32_t frac = raw & 0x1F;
+
+    int16_t o0 = encoder_lut[idx];
+    int16_t o1 = encoder_lut[(idx + 1) & 0xFF];
+
+    int32_t interp = o0 + (((int32_t)(o1 - o0) * frac) >> 5);
+
+    raw = (raw + interp) & ENCODER_MASK;
+  }
+
+  return raw;
+}
+
+uint16_t motor_interface_get_position_raw(void)
 {
   ws22_parse_latest_frame();
 
   uint16_t raw = currentData.position & ENCODER_MASK;
 
-  // 1. Apply direction reversal
+  // Apply direction reversal ONLY
   if (reverse_direction)
     raw = (ENCODER_COUNTS - raw) & ENCODER_MASK;
 
-  // 2. Apply calibration offset
-  raw = (raw - encoder_offset) & ENCODER_MASK;
-
-  return raw;   // PROCESSED
+  return raw;
 }
-
 
 MotorSensorData motor_interface_get_data(void)
 {
   ws22_parse_latest_frame();
   return currentData;
 }
-
-//
-// /**
-//   * @brief  Get current motor sensor data
-//   * @retval MotorSensorData structure with current readings
-//   */
-// MotorSensorData motor_interface_get_data(void)
-// {
-//   return currentData;
-// }
-//
-// uint8_t *get_raw_uart(void) {
-//   return rxBuf;
-// }
-//
-// /**
-//   * @brief  Process UART receive callback for motor interface
-//   * @param  huart: UART handle
-//   * @retval None
-//   */
-// void motor_interface_process_rx_callback(UART_HandleTypeDef *huart)
-// {
-//   // HAL_UART_Receive_IT(&huart5, rxBuf, 4);
-//   //
-//   // return ;
-//
-//   LL_GPIO_SetOutputPin(GPO1_GPIO_Port, GPO1_Pin);
-//
-//   if (huart->Instance == UART5)
-//   {
-//     if (frameIndex == 0)
-//     {
-//       // Looking for sync byte (bit 7 must be 1)
-//       if ((rxByte & SYNC_BIT_MASK) != 0)
-//       {
-//         // Found sync byte - start of packet
-//         rxBuf[0] = rxByte;
-//         frameIndex = 1;
-//       }
-//       else
-//       {
-//         // Not a sync byte, keep looking
-//         syncErrors++;
-//       }
-//     }
-//     else
-//     {
-//       // We're in the middle of a frame
-//       // Bytes 2-4 should have bit 7 clear (0x00-0x7F)
-//       if ((rxByte & SYNC_BIT_MASK) != 0)
-//       {
-//         // Found another sync byte - frame was incomplete, restart
-//         syncErrors++;
-//         rxBuf[0] = rxByte;
-//         frameIndex = 1;
-//       }
-//       else
-//       {
-//         // Valid data byte
-//         rxBuf[frameIndex] = rxByte;
-//         frameIndex++;
-//
-//         if (frameIndex == 4)
-//         {
-//           // Complete frame received - parse it
-//           uint8_t startByte = rxBuf[0];
-//           uint8_t msgType = (startByte >> 6) & 0x03;  // Bits 7-6
-//
-//           if (msgType == 0b10)
-//           {
-//             // Device type packet
-//             currentData.device_type = startByte & MASK_6B;
-//             currentData.message_type = 0;
-//             currentData.valid = 1;
-//           }
-//           else if (msgType == 0b11)
-//           {
-//             // Temperature + position packet
-//             currentData.temperature = ((uint16_t)(rxBuf[0] & MASK_6B) << 7) | (rxBuf[1] & MASK_7B);
-//             currentData.position = ((uint16_t)(rxBuf[2] & MASK_7B) << 7) | (rxBuf[3] & MASK_7B);
-//             currentData.message_type = 1;
-//             currentData.valid = 1;
-//             // if (debugMode)
-//             // {
-//             //   printf("  -> TEMP+POS: Temp=%u | Pos=%u\r\n", currentData.temperature, currentData.position);
-//             // }
-//           }
-//
-//           validPackets++;
-//           frameIndex = 0;  // Reset for next frame
-//         }
-//       }
-//     }
-//
-//     // Continue receiving
-//     HAL_UART_Receive_IT(&huart5, &rxByte, 1);
-//   }
-//   LL_GPIO_ResetOutputPin(GPO1_GPIO_Port, GPO1_Pin);
-// }
 

@@ -29,16 +29,17 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include "stm32g4xx_hal.h"
 
 
 /* Variables */
 extern int __io_putchar(int ch) __attribute__((weak));
 extern int __io_getchar(void) __attribute__((weak));
 
+extern UART_HandleTypeDef huart4;   // or whichever UART you use
 
 char *__env[1] = { 0 };
 char **environ = __env;
-
 
 /* Functions */
 void initialise_monitor_handles()
