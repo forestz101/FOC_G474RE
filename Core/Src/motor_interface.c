@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include "usart.h"
 #include "dma.h"
+#include "foc.h"
 #include "stm32g4xx_ll_usart.h"
 #include "stm32g4xx_ll_dma.h"
 
@@ -56,7 +57,7 @@ void motor_interface_init(void)
   LL_DMA_DisableIT_TC(DMA1, LL_DMA_CHANNEL_3);
   LL_DMA_DisableIT_TE(DMA1, LL_DMA_CHANNEL_3);
 
-  // motor_interface_load_calibration();
+  motor_interface_load_calibration();
 }
 
 static inline uint32_t ws22_dma_write_index(void)
@@ -163,12 +164,33 @@ void motor_interface_save_calibration(void)
 {
   EncoderCalData cal;
 
-  cal.offset    = encoder_offset;
-  cal.reverse   = reverse_direction;
-  cal.lut_valid = lut_valid;
+  if (encoder_offset != cal.offset)
+  {
+    printf("Saving calibration: offset = %u counts\r\n", encoder_offset);
+    cal.offset = encoder_offset;
+  }
 
-  for (int i = 0; i < LUT_SIZE; i++)
-    cal.lut[i] = encoder_lut[i];
+  if (reverse_direction != cal.reverse)
+  {
+    printf("Saving calibration: reverse = %u\r\n", reverse_direction);
+    cal.reverse = reverse_direction;
+  }
+
+  if (lut_valid)
+  {
+    printf("Saving calibration: LUT:\r\n");
+    cal.lut_valid = lut_valid;
+
+    for (int i = 0; i < LUT_SIZE; i++)
+    {
+      printf("  LUT[%d] = %+6d\r\n", i, encoder_lut[i]);
+      cal.lut[i] = encoder_lut[i];
+    }
+  } else
+  {
+    cal.lut_valid = 0;
+    printf("Saving calibration: lut_valid = %u\r\n", lut_valid);
+  }
 
   HAL_FLASH_Unlock();
 
@@ -226,6 +248,11 @@ uint16_t motor_interface_get_position(void)
   }
 
   return raw;
+}
+
+float motor_interface_get_position_rad(void)
+{
+  return (float)motor_interface_get_position() / ENCODER_COUNTS * PI2_F;
 }
 
 uint16_t motor_interface_get_position_raw(void)

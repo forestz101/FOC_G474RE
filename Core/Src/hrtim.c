@@ -69,7 +69,7 @@ void MX_HRTIM1_Init(void)
   {
     Error_Handler();
   }
-  pTimeBaseCfg.Period = 60000-1;
+  pTimeBaseCfg.Period = 0xFFFF-1;
   pTimeBaseCfg.RepetitionCounter = 0;
   pTimeBaseCfg.PrescalerRatio = HRTIM_PRESCALERRATIO_MUL8;
   pTimeBaseCfg.Mode = HRTIM_MODE_CONTINUOUS;
@@ -96,10 +96,8 @@ void MX_HRTIM1_Init(void)
   {
     Error_Handler();
   }
-  pTimeBaseCfg.Period = 60000-5;
   pTimeBaseCfg.RepetitionCounter = 0x00;
   pTimeBaseCfg.PrescalerRatio = HRTIM_PRESCALERRATIO_MUL16;
-  pTimeBaseCfg.Mode = HRTIM_MODE_SINGLESHOT_RETRIGGERABLE;
   if (HAL_HRTIM_TimeBaseConfig(&hhrtim1, HRTIM_TIMERINDEX_TIMER_A, &pTimeBaseCfg) != HAL_OK)
   {
     Error_Handler();
@@ -126,7 +124,7 @@ void MX_HRTIM1_Init(void)
   pTimerCfg.DeadTimeInsertion = HRTIM_TIMDEADTIMEINSERTION_DISABLED;
   pTimerCfg.DelayedProtectionMode = HRTIM_TIMER_A_B_C_DELAYEDPROTECTION_DISABLED;
   pTimerCfg.UpdateTrigger = HRTIM_TIMUPDATETRIGGER_NONE;
-  pTimerCfg.ResetTrigger = HRTIM_TIMRESETTRIGGER_MASTER_PER;
+  pTimerCfg.ResetTrigger = HRTIM_TIMRESETTRIGGER_NONE;
   pTimerCfg.ResetUpdate = HRTIM_TIMUPDATEONRESET_DISABLED;
   if (HAL_HRTIM_WaveformTimerConfig(&hhrtim1, HRTIM_TIMERINDEX_TIMER_A, &pTimerCfg) != HAL_OK)
   {
@@ -146,7 +144,7 @@ void MX_HRTIM1_Init(void)
   {
     Error_Handler();
   }
-  pOutputCfg.Polarity = HRTIM_OUTPUTPOLARITY_LOW;
+  pOutputCfg.Polarity = HRTIM_OUTPUTPOLARITY_HIGH;
   pOutputCfg.SetSource = HRTIM_OUTPUTSET_TIMCMP1;
   pOutputCfg.ResetSource = HRTIM_OUTPUTRESET_TIMCMP1;
   pOutputCfg.IdleMode = HRTIM_OUTPUTIDLEMODE_NONE;
@@ -203,7 +201,6 @@ void MX_HRTIM1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN HRTIM1_Init 2 */
-
   /* USER CODE END HRTIM1_Init 2 */
   HAL_HRTIM_MspPostInit(&hhrtim1);
 
@@ -221,7 +218,7 @@ void HAL_HRTIM_MspInit(HRTIM_HandleTypeDef* hrtimHandle)
     __HAL_RCC_HRTIM1_CLK_ENABLE();
 
     /* HRTIM1 interrupt Init */
-    HAL_NVIC_SetPriority(HRTIM1_Master_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(HRTIM1_Master_IRQn, 1, 0);
     HAL_NVIC_EnableIRQ(HRTIM1_Master_IRQn);
   /* USER CODE BEGIN HRTIM1_MspInit 1 */
 

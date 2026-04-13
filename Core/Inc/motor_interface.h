@@ -25,13 +25,14 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usart.h"
+#include "foc.h"
 
 #define ENCODER_BITS     14
-#define ENCODER_COUNTS   (1U << ENCODER_BITS)   // 8192
-#define ENCODER_MASK     (ENCODER_COUNTS - 1U)  // 0x1FFF
+#define ENCODER_COUNTS   (1U << ENCODER_BITS)
+#define ENCODER_MASK     (ENCODER_COUNTS - 1U)
 #define WS22_DMA_BUF_SIZE 128  // power of 2 (e.g., 64, 128, 256)
 #define LUT_SIZE 64
-#define POLE_PAIRS 1
+#define POLE_PAIRS 16
 #define CAL_SAMPLES (LUT_SIZE * POLE_PAIRS)
 #define CALIB_FLASH_ADDR  0x0807F800  // last flash page G474RE
 
@@ -46,6 +47,7 @@ extern volatile float commanded_position_deg;
 
 void motor_interface_init(void);
 uint16_t motor_interface_get_position(void);
+float motor_interface_get_position_rad(void);
 uint16_t motor_interface_get_position_raw(void);
 MotorSensorData motor_interface_get_data(void);
 void motor_interface_set_offset(uint16_t off);

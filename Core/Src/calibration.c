@@ -28,41 +28,39 @@ int16_t wrap_diff(int32_t diff)
     return (int16_t)diff;
 }
 
-void calibrate_offset(const float Ud)
+void calibrate_offset(const float Ud, const uint16_t steps, const uint16_t delay)
 {
     printf("\r\n=== BEGIN OFFSET CALIBRATION ===\r\n");
 
     foc_cmd.ud = Ud;
 
-    int32_t offset_sum = 0;
+    int64_t offset_sum = 0;
     int16_t offset = 0;
+    el_angle = - PI2_F * POLE_PAIRS / steps;
+    OpenLoopStep();
+    HAL_Delay(1000);
 
-    for (int i = 0; i < POLE_PAIRS; i++)
+    for (uint16_t i = 0; i < steps; i++)
     {
-        for (int j = 0; j < 129; j++)
-        {
-            float theta_elec = (PI2_F * j) / 128;
-            el_angle = theta_elec;
-            OpenLoopStep();
-            HAL_Delay(5);
-        }
-        HAL_Delay(1000);
-        uint16_t raw = motor_interface_get_position_raw();
+        float theta_elec = (PI2_F * i * POLE_PAIRS) / steps;
+        el_angle = theta_elec;
+        OpenLoopStep();
+        HAL_Delay(delay);
 
-        if (raw > ENCODER_COUNTS/2)
-        {
-            offset = raw - ENCODER_COUNTS;
-        } else
-        {
-            offset = raw;
-        }
+        uint16_t raw = motor_interface_get_position_raw();
+        uint16_t cmd = i * ENCODER_COUNTS * POLE_PAIRS / steps;
+        cmd = cmd % ENCODER_COUNTS;
+
+        offset = raw - cmd;
+        offset = wrap_diff(offset);
 
         offset_sum += offset;
-        printf("Electrical revolution %2d | Raw %4u, | Offset %4d\r\n", i, raw, offset);
+
+        printf("Step: %4u | Raw %5u, | Offset %4d\r\n", i, raw, offset);
 
     }
 
-    int16_t offset_avg = offset_sum / POLE_PAIRS;
+    int16_t offset_avg = offset_sum / steps;
     printf("Average Offset = %+6d\r\n", offset_avg);
     motor_interface_set_offset((offset_avg + ENCODER_COUNTS) & ENCODER_MASK);
 }

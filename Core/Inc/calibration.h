@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 void calibrate(float Ud, float Vbus);
-void calibrate_offset(float Ud);
+void calibrate_offset(float Ud, uint16_t steps, uint16_t delay);
 void calibrate_clear(void);
 
 #endif //FOC_G474RE_CALIBRATION_H

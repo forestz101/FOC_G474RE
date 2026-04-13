@@ -128,19 +128,23 @@ int main(void)
   /* USER CODE BEGIN 2 */
   motor_interface_init();
   start_adc();
-  start_hrtim();
   foc_init();
+  start_hrtim();
   uint16_t count = 0;
-  float angled = 0.2;
+  float angled = 0.01;
   // float angle = 0;
   LL_GPIO_SetOutputPin(PHASE_EN_GPIO_Port, PHASE_EN_Pin);
   HAL_Delay(1);
+  foc_cmd.iq_ref = 5.0f;
+  foc_enable = 1;
 
   // motor_interface_set_reverse(1);
 
   // calibrate(1.6, 30);
   // calibrate_clear();
-  // calibrate_offset(1.6, 30);
+  // calibrate_offset(1.6, 256 ,500);
+  // motor_interface_set_offset(12329);
+  // motor_interface_save_calibration();
 
   /* USER CODE END 2 */
 
@@ -148,17 +152,27 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    // printf("Pos: %5u Rad: %.2f Raw: %5u \r\n",
+    //   motor_interface_get_position(),
+    //   motor_interface_get_position_rad(),
+    //   motor_interface_get_position_raw()
+    //   );
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 
     printf("CMD_UD: %.2f UD: %.2f CMD_UQ: %.2f UQ: %.2f\r\n", foc_cmd.ud, dq.id, foc_cmd.uq, dq.iq);
-    el_angle = el_angle + angled;
-    if (el_angle > PI2_F)
-    {
-      el_angle -= PI2_F;
-    }
-    LL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+
+
+    // el_angle = el_angle + angled;
+    // if (el_angle > PI2_F)
+    // {
+    //   el_angle -= PI2_F;
+    // }
+    // LL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+    // foc_cmd.uq = 2.0f;
+    // el_angle = motor_interface_get_position_rad();
+    // OpenLoopStep();
 
     // LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
     HAL_Delay(1);
@@ -177,7 +191,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
+  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -188,9 +202,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV4;
-  RCC_OscInitStruct.PLL.PLLN = 85;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV8;
+  RCC_OscInitStruct.PLL.PLLN = 50;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -206,7 +220,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }

@@ -2,7 +2,7 @@
 #include <math.h>
 #include "hrtim.h"
 
-float vbus = 30;
+float vbus = 20;
 float el_angle = 0;
 float current_scale = ADC_SCALE / CC6922SG_SENS;
 uint8_t foc_enable = 0;
@@ -15,16 +15,16 @@ foc_commands_t foc_cmd = {
 };
 
 pi_t pi_d = {
-    .kp = 0.5f,
-    .ki = 0.2f,
+    .kp = 3.0f,
+    .ki = 0.3f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
 };
 
 pi_t pi_q = {
-    .kp = 0.5f,
-    .ki = 0.2f,
+    .kp = 3.0f,
+    .ki = 0.3f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
@@ -83,7 +83,7 @@ void foc_init()
     pi_q.out_max =  vmax;
 
     foc_cmd.id_ref = 0.0f;
-    foc_cmd.iq_ref = 5.0f;
+    foc_cmd.iq_ref = .0f;
 }
 
 void GetPhaseCurrents()
@@ -133,9 +133,14 @@ void ComputePWMDuty()
     duty.d_b = v_abc.v_b / vbus + 0.5f;
     duty.d_c = v_abc.v_c / vbus + 0.5f;
 
-    if (duty.d_a > 0.99f) duty.d_a = 0.99f;
-    if (duty.d_b > 0.99f) duty.d_b = 0.99f;
-    if (duty.d_c > 0.99f) duty.d_c = 0.99f;
+    if (duty.d_a < 0.03f) duty.d_a = 0.03f;
+    if (duty.d_b < 0.03f) duty.d_b = 0.03f;
+    if (duty.d_c < 0.03f) duty.d_c = 0.03f;
+
+    if (duty.d_a > 0.97f) duty.d_a = 0.97f;
+    if (duty.d_b > 0.97f) duty.d_b = 0.97f;
+    if (duty.d_c > 0.97f) duty.d_c = 0.97f;
+
 }
 
 void WriteDuty()
@@ -196,14 +201,6 @@ void FOC_Step(const float dt)
 void OpenLoopStep()
 {
     CalculateFOCTrig();
-
-    // Testing
-    phase_currents.i_a = 0.0f;
-    phase_currents.i_b = 5.0f;
-    phase_currents.i_c = -5.0f;
-    ClarkeTransform();
-    ParkTransform();
-
     InversePark();
     InverseClarke();
     ComputePWMDuty();
