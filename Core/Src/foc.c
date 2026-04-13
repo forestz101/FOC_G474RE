@@ -1,156 +1,171 @@
 #include "foc.h"
 #include <math.h>
-
 #include "hrtim.h"
 
-float Vbus = 30;
-float angle = 0;
+float vbus = 30;
+float el_angle = 0;
+float current_scale = ADC_SCALE / CC6922SG_SENS;
+uint8_t foc_enable = 0;
 
-FOC_Commands_t foc_cmd = {
-    .Id_ref = 0.0f,
-    .Iq_ref = 0.0f,
-    .Ud = 0.0f,
-    .Uq = 0.0f
+foc_commands_t foc_cmd = {
+    .id_ref = 0.0f,
+    .iq_ref = 0.0f,
+    .ud = 0.0f,
+    .uq = 0.0f
 };
 
-PI_t pi_d = {
-    .Kp = 0.1f,
-    .Ki = 0.0f,
+pi_t pi_d = {
+    .kp = 0.5f,
+    .ki = 0.2f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
 };
 
-PI_t pi_q = {
-    .Kp = 0.1f,
-    .Ki = 0.0f,
+pi_t pi_q = {
+    .kp = 0.5f,
+    .ki = 0.2f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
 };
 
-PhaseCurrents_t phase_currents = {
-    .Ia = 0.0f,
-    .Ib = 0.0f,
-    .Ic = 0.0f
+phase_currents_t phase_currents = {
+    .i_a = 0.0f,
+    .i_b = 0.0f,
+    .i_c = 0.0f
 };
+
+foc_trig_t foc_trig = {
+    .sin_theta = 0.0f,
+    .cos_theta = 0.0f
+};
+
+volt_alpha_beta_t volt_ab = {
+    .v_alpha = 0.0f,
+    .v_beta = 0.0f
+};
+
+alpha_beta_t alpha_beta = {
+    .i_alpha = 0.0f,
+    .i_beta = 0.0f
+};
+
+direct_quadrature_t dq = {
+    .id = 0.0f,
+    .iq = 0.0f
+};
+
+v_abc_t v_abc = {
+    .v_a = 0.0f,
+    .v_b = 0.0f,
+    .v_c = 0.0f
+};
+
+duty_t duty = {
+    .d_a = 0.0f,
+    .d_b = 0.0f,
+    .d_c = 0.0f
+};
+
 
 // PhaseCurrents_t phase_currents;
 volatile uint16_t current_buf[2] = {0}; // [CSA, CSC]
 volatile uint16_t current_ref_buf[2] = {0}; // [CSA REF, CSC REF]
 
-void foc_init(volatile float vbus)
+void foc_init()
 {
-    Vbus = vbus;
+    const float vmax = vbus / 2;
+    pi_d.out_min = -vmax;
+    pi_d.out_max =  vmax;
 
-    pi_d.out_min = -Vbus;
-    pi_d.out_max =  Vbus;
+    pi_q.out_min = -vmax;
+    pi_q.out_max =  vmax;
 
-    pi_q.out_min = -Vbus;
-    pi_q.out_max =  Vbus;
-
-    foc_cmd.Id_ref = 5.0f;
-    foc_cmd.Iq_ref = 0.0f;
+    foc_cmd.id_ref = 0.0f;
+    foc_cmd.iq_ref = 5.0f;
 }
 
-void GetPhaseCurrents(PhaseCurrents_t *I, uint16_t current_data[2], uint16_t reference_data[2])
+void GetPhaseCurrents()
 {
-    // Convert ADC readings to voltages
-    float VrefA   = reference_data[0] * ADC_SCALE;
-    float VrefC   = reference_data[1] * ADC_SCALE;
+    const int16_t a_diff = (int16_t)(current_buf[0] - current_ref_buf[0]);
+    const int16_t c_diff = (int16_t)(current_buf[1] - current_ref_buf[1]);
 
-    float VsenseA = current_data[0] * ADC_SCALE;
-    float VsenseC = current_data[1] * ADC_SCALE;
-
-    // Compute currents
-    float Ia = (VsenseA - VrefA) / CC6922SG_SENS;
-    float Ic = (VsenseC - VrefC) / CC6922SG_SENS;
-
-    Ia = -Ia;   // IP− → motor
-    // Ic = -Ic;
-    // Ic stays positive (IP+ → motor)
-
-    // Clarke transform uses Ia and Ib, so compute Ib
-    const float Ib = -(Ia + Ic);
-
-    I->Ia = Ia;
-    I->Ib = Ib;
-    I->Ic = Ic;
+    phase_currents.i_a = (float)a_diff * current_scale;
+    phase_currents.i_c = (float)c_diff * current_scale * -1;    // C-phase sensor polarity reversed
+    phase_currents.i_b = -(phase_currents.i_a + phase_currents.i_c);
 }
 
-// -------------------------
-// Clarke Transform
-// -------------------------
-AlphaBeta_t Clarke(const PhaseCurrents_t I)
+void CalculateFOCTrig()
 {
-    AlphaBeta_t out;
-    out.Ialpha = I.Ia;
-    out.Ibeta  = (I.Ia + 2.0f * I.Ib) * 0.57735026919f; // 1/sqrt(3)
-    return out;
+    foc_trig.sin_theta = sinf(el_angle);
+    foc_trig.cos_theta = cosf(el_angle);
 }
 
-// -------------------------
-// Park Transform
-// -------------------------
-void Park(AlphaBeta_t Iab, float angle, float *Id, float *Iq)
+void ClarkeTransform()
 {
-    float s = sinf(angle);
-    float c = cosf(angle);
-
-    *Id =  Iab.Ialpha * c + Iab.Ibeta * s;
-    *Iq = -Iab.Ialpha * s + Iab.Ibeta * c;
+    alpha_beta.i_alpha = phase_currents.i_a;
+    alpha_beta.i_beta  = phase_currents.i_a * INVERSE_SQRT3_F + phase_currents.i_b * INVERSE_2SQRT3_F;
 }
 
-// -------------------------
-// Inverse Park
-// -------------------------
-VoltAlphaBeta_t InvPark(float Ud, float Uq, float angle)
+void ParkTransform()
 {
-    VoltAlphaBeta_t out;
-
-    float s = sinf(angle);
-    float c = cosf(angle);
-
-    out.Valpha = Ud * c - Uq * s;
-    out.Vbeta  = Ud * s + Uq * c;
-
-    return out;
+    dq.id =  alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta;
+    dq.iq = -alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta;
 }
 
-// -------------------------
-// SVPWM
-// -------------------------
-DutyABC_t SVPWM(VoltAlphaBeta_t v, float Vbus)
+void InversePark()
 {
-    DutyABC_t d;
-
-    float X = v.Vbeta;
-    float Y = (0.8660254f * v.Valpha - 0.5f * v.Vbeta);
-    float Z = (-0.8660254f * v.Valpha - 0.5f * v.Vbeta);
-
-    float Tmax = fmaxf(fmaxf(X, Y), Z);
-    float Tmin = fminf(fminf(X, Y), Z);
-
-    float offset = 0.5f * (Tmax + Tmin);
-
-    d.Ta = (X - offset) / Vbus + 0.5f;
-    d.Tb = (Y - offset) / Vbus + 0.5f;
-    d.Tc = (Z - offset) / Vbus + 0.5f;
-
-    return d;
+    volt_ab.v_alpha = foc_cmd.ud * foc_trig.cos_theta - foc_cmd.uq * foc_trig.sin_theta;
+    volt_ab.v_beta  = foc_cmd.ud * foc_trig.sin_theta + foc_cmd.uq * foc_trig.cos_theta;
 }
 
-// -------------------------
-// PI Controller
-// -------------------------
-float PI_Run(PI_t *pi, float error, float dt)
+void InverseClarke()
 {
-    pi->integrator += pi->Ki * error * dt;
+    v_abc.v_a = volt_ab.v_alpha;
+    v_abc.v_b = (-volt_ab.v_alpha + SQRT3_F * volt_ab.v_beta) / 2;
+    v_abc.v_c = (-volt_ab.v_alpha - SQRT3_F * volt_ab.v_beta) / 2;
+}
+
+void ComputePWMDuty()
+{
+    duty.d_a = v_abc.v_a / vbus + 0.5f;
+    duty.d_b = v_abc.v_b / vbus + 0.5f;
+    duty.d_c = v_abc.v_c / vbus + 0.5f;
+
+    if (duty.d_a > 0.99f) duty.d_a = 0.99f;
+    if (duty.d_b > 0.99f) duty.d_b = 0.99f;
+    if (duty.d_c > 0.99f) duty.d_c = 0.99f;
+}
+
+void WriteDuty()
+{
+    const uint16_t a_counts = (uint16_t)(duty.d_a * PWM_PERIOD);
+    const uint16_t b_counts = (uint16_t)(duty.d_b * PWM_PERIOD);
+    const uint16_t c_counts = (uint16_t)(duty.d_c * PWM_PERIOD);
+
+    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
+                      HRTIM_TIMERINDEX_TIMER_B,
+                      HRTIM_COMPAREUNIT_1,
+                      a_counts);
+    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
+                      HRTIM_TIMERINDEX_TIMER_A,
+                      HRTIM_COMPAREUNIT_1,
+                      b_counts);
+    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
+                      HRTIM_TIMERINDEX_TIMER_E,
+                      HRTIM_COMPAREUNIT_1,
+                      c_counts);
+}
+
+float PI_Run(pi_t *pi, float error, float dt)
+{
+    pi->integrator += pi->ki * error * dt;
 
     if (pi->integrator > pi->out_max) pi->integrator = pi->out_max;
     if (pi->integrator < pi->out_min) pi->integrator = pi->out_min;
 
-    float out = pi->Kp * error + pi->integrator;
+    float out = pi->kp * error + pi->integrator;
 
     if (out > pi->out_max) out = pi->out_max;
     if (out < pi->out_min) out = pi->out_min;
@@ -158,66 +173,39 @@ float PI_Run(PI_t *pi, float error, float dt)
     return out;
 }
 
-// -------------------------
-// Main FOC Step
-// -------------------------
-void FOC_Step(
-    PhaseCurrents_t I,
-    float Vbus,
-    float angle,
-    PI_t *pi_d,
-    PI_t *pi_q,
-    FOC_Commands_t *cmd,
-    float dt)
+void FOC_Step(const float dt)
 {
     // float angle = getAngle();
+    GetPhaseCurrents();
+    CalculateFOCTrig();
+    ClarkeTransform();
+    ParkTransform();
 
-    AlphaBeta_t Iab = Clarke(I);
+    const float err_d = foc_cmd.id_ref - dq.id;
+    const float err_q = foc_cmd.iq_ref - dq.iq;
 
-    float Id, Iq;
-    Park(Iab, 0, &Id, &Iq);
+    foc_cmd.ud = PI_Run(&pi_d, err_d, dt);
+    foc_cmd.uq = PI_Run(&pi_q, err_q, dt);
 
-    float err_d = cmd->Id_ref - Id;
-    float err_q = cmd->Iq_ref - Iq;
-
-    cmd->Ud = PI_Run(pi_d, err_d, dt);
-    cmd->Uq = PI_Run(pi_q, err_q, dt);
-
-    VoltAlphaBeta_t Vab = InvPark(cmd->Ud, cmd->Uq, 0);
-
-    DutyABC_t d = SVPWM(Vab, Vbus);
-
-    write_duty(d);
-
-    // Hardware write is done outside this module
-    // (HRTIM, TIM1, etc.)
+    InversePark();
+    InverseClarke();
+    ComputePWMDuty();
+    WriteDuty();
 }
 
-DutyABC_t open_loop_step(float Ud, float Uq, float angle, float Vbus)
+void OpenLoopStep()
 {
-    VoltAlphaBeta_t Vab = InvPark(Ud, Uq, angle);
+    CalculateFOCTrig();
 
-    DutyABC_t d = SVPWM(Vab, Vbus);
+    // Testing
+    phase_currents.i_a = 0.0f;
+    phase_currents.i_b = 5.0f;
+    phase_currents.i_c = -5.0f;
+    ClarkeTransform();
+    ParkTransform();
 
-    return d;
-}
-
-void write_duty(const DutyABC_t duty)
-{
-    uint16_t counta = duty.Ta * 59999;
-    uint16_t countb = duty.Tb * 59999;
-    uint16_t countc = duty.Tc * 59999;
-
-    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
-                      HRTIM_TIMERINDEX_TIMER_B,
-                      HRTIM_COMPAREUNIT_1,
-                      counta);
-    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
-                      HRTIM_TIMERINDEX_TIMER_A,
-                      HRTIM_COMPAREUNIT_1,
-                      countb);
-    __HAL_HRTIM_SETCOMPARE(&hhrtim1,
-                      HRTIM_TIMERINDEX_TIMER_E,
-                      HRTIM_COMPAREUNIT_1,
-                      countc);
+    InversePark();
+    InverseClarke();
+    ComputePWMDuty();
+    WriteDuty();
 }

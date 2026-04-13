@@ -219,29 +219,14 @@ void HRTIM1_Master_IRQHandler(void)
   /* USER CODE BEGIN HRTIM1_Master_IRQn 0 */
   // Clear the Master Update interrupt flag
   __HAL_HRTIM_MASTER_CLEAR_IT(&hhrtim1, HRTIM_MASTER_IT_MUPD);
-
-  // 1. Read latest ADC currents (DMA already updated these)
-  PhaseCurrents_t I;
-  GetPhaseCurrents(&I, current_buf, current_ref_buf);
-
-  // 2. Read rotor electrical angle
-  // float angle = 0;
-
-  // 3. Run FOC
-  FOC_Step(
-      I,
-      30,
-      angle,
-      &pi_d,
-      &pi_q,
-      &foc_cmd,
-      CONTROL_DT   // dt = 1 / PWM frequency
-  );
+  if (foc_enable)
+  {
+    FOC_Step(CONTROL_DT);
+  }
 
   /* USER CODE END HRTIM1_Master_IRQn 0 */
   HAL_HRTIM_IRQHandler(&hhrtim1,HRTIM_TIMERINDEX_MASTER);
   /* USER CODE BEGIN HRTIM1_Master_IRQn 1 */
-
   /* USER CODE END HRTIM1_Master_IRQn 1 */
 }
 

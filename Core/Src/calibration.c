@@ -28,9 +28,11 @@ int16_t wrap_diff(int32_t diff)
     return (int16_t)diff;
 }
 
-void calibrate_offset(const float Ud, const float Vbus)
+void calibrate_offset(const float Ud)
 {
     printf("\r\n=== BEGIN OFFSET CALIBRATION ===\r\n");
+
+    foc_cmd.ud = Ud;
 
     int32_t offset_sum = 0;
     int16_t offset = 0;
@@ -39,9 +41,9 @@ void calibrate_offset(const float Ud, const float Vbus)
     {
         for (int j = 0; j < 129; j++)
         {
-            float theta_elec = (2.0f * PI_F * j) / 128;
-            DutyABC_t d = open_loop_step(Ud, 0.0f, theta_elec, Vbus);
-            write_duty(d);
+            float theta_elec = (PI2_F * j) / 128;
+            el_angle = theta_elec;
+            OpenLoopStep();
             HAL_Delay(5);
         }
         HAL_Delay(1000);
@@ -78,8 +80,7 @@ void calibrate(const float Ud, const float Vbus)
         // Electrical angle = 0 → 2π * POLE_PAIRS
         float theta_elec = (2.0f * PI_F * POLE_PAIRS * i) / CAL_SAMPLES;
 
-        DutyABC_t d = open_loop_step(Ud, 0.0f, theta_elec, Vbus);
-        write_duty(d);
+        OpenLoopStep();
         HAL_Delay(250);   // shorter delay OK with oversampling
 
         uint16_t raw = motor_interface_get_position_raw();

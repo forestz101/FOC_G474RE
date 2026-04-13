@@ -2,16 +2,14 @@
 // Created by Forest on 2026-02-12.
 //
 
-#define SQRT3_F 1.7320508075688772f
+// Math Constants
+#define SQRT3_F 1.732050807568877f
+#define HALF_SQRT3_F 0.8660254037844386f
+#define INVERSE_SQRT3_F 0.5773502691896258f
+#define INVERSE_2SQRT3_F 1.154700538379252f
+
 #define PI_F 3.141592653589793f
-
-#define TIMERID_PHA HRTIM_TIMERID_TIMER_B
-#define TIMERID_PHB HRTIM_TIMERID_TIMER_A
-#define TIMERID_PHC HRTIM_TIMERID_TIMER_E
-
-#define TIMEROUT_PHA HRTIM_OUTPUT_TB1
-#define TIMEROUT_PHB HRTIM_OUTPUT_TA1
-#define TIMEROUT_PHC HRTIM_OUTPUT_TE1
+#define PI2_F 6.283185307179586f
 
 // ADC reference voltage
 #define ADC_VREF     3.3f
@@ -21,85 +19,87 @@
 #define CC6922SG_SENS 0.0132f   // 13.2 mV/A
 
 // Control loop period length
-#define CONTROL_DT (1.0f / 22667.0f)
+#define CONTROL_DT (1.0f / 20753f)
+#define PWM_PERIOD 65534    // 0xFFFF - 1
 
-#include "main.h"
-// #include "tim.h"
 #ifndef FOC_H
 #define FOC_H
 
+#include "main.h"
 #include <stdint.h>
 
 typedef struct {
-    float Ia;
-    float Ib;
-    float Ic;
-} PhaseCurrents_t;
+    float i_a;
+    float i_b;
+    float i_c;
+} phase_currents_t;
 
 typedef struct {
-    float Ialpha;
-    float Ibeta;
-} AlphaBeta_t;
+    float i_alpha;
+    float i_beta;
+} alpha_beta_t;
 
 typedef struct {
-    float Valpha;
-    float Vbeta;
-} VoltAlphaBeta_t;
+    float v_alpha;
+    float v_beta;
+} volt_alpha_beta_t;
 
 typedef struct {
-    float Ta;
-    float Tb;
-    float Tc;
-} DutyABC_t;
+    float id;
+    float iq;
+} direct_quadrature_t;
 
 typedef struct {
-    float Kp;
-    float Ki;
+    float sin_theta;
+    float cos_theta;
+} foc_trig_t;
+
+typedef struct {
+    float v_a;
+    float v_b;
+    float v_c;
+} v_abc_t;
+
+typedef struct {
+    float d_a;
+    float d_b;
+    float d_c;
+} duty_t;
+
+typedef struct {
+    float kp;
+    float ki;
     float integrator;
     float out_min;
     float out_max;
-} PI_t;
+} pi_t;
 
 typedef struct {
-    float Id_ref;
-    float Iq_ref;
-    float Ud;
-    float Uq;
-} FOC_Commands_t;
+    float id_ref;
+    float iq_ref;
+    float ud;
+    float uq;
+} foc_commands_t;
 
 extern volatile uint16_t current_buf[2]; // [CSA, CSC]
 extern volatile uint16_t current_ref_buf[2]; // [CSA REF, CSC REF]
-extern PhaseCurrents_t phase_currents;
+extern phase_currents_t phase_currents;
 extern float vbus;
-extern PI_t pi_d;
-extern PI_t pi_q;
-extern FOC_Commands_t foc_cmd;
-
-extern float angle;
-
-// Angle provider function pointer
-typedef float (*AngleProvider_t)(void);
+extern pi_t pi_d;
+extern pi_t pi_q;
+extern foc_commands_t foc_cmd;
+extern direct_quadrature_t dq;
+extern float el_angle;
+extern uint8_t foc_enable;
 
 // Public API
-void foc_init(volatile float Vbus);
-void GetPhaseCurrents(PhaseCurrents_t *I, uint16_t current_data[2], uint16_t reference_data[2]);
-AlphaBeta_t Clarke(PhaseCurrents_t I);
-void Park(AlphaBeta_t Iab, float angle, float *Id, float *Iq);
-VoltAlphaBeta_t InvPark(float Ud, float Uq, float angle);
-DutyABC_t SVPWM(VoltAlphaBeta_t v, float Vbus);
-float getAngle();
+void foc_init();
+void GetPhaseCurrents();
+void ClarkeTransform();
+void ParkTransform();
+void InversePark();
+float PI_Run(pi_t *pi, float error, float dt);
+void FOC_Step(float dt);
+void OpenLoopStep();
 
-float PI_Run(PI_t *pi, float error, float dt);
-
-void FOC_Step(
-    PhaseCurrents_t I,
-    float Vbus,
-    float angle,
-    PI_t *pi_d,
-    PI_t *pi_q,
-    FOC_Commands_t *cmd,
-    float dt);
-
-DutyABC_t open_loop_step(float Ud, float Uq, float angle, float Vbus);
-void write_duty(const DutyABC_t duty);
-#endif // F446_FOC_FOC_H
+#endif // FOC_H

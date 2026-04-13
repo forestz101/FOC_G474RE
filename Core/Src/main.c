@@ -129,18 +129,18 @@ int main(void)
   motor_interface_init();
   start_adc();
   start_hrtim();
-  foc_init(30);
+  foc_init();
   uint16_t count = 0;
-  float angled = 0.001;
+  float angled = 0.2;
   // float angle = 0;
   LL_GPIO_SetOutputPin(PHASE_EN_GPIO_Port, PHASE_EN_Pin);
-  HAL_Delay(100);
+  HAL_Delay(1);
 
   // motor_interface_set_reverse(1);
 
   // calibrate(1.6, 30);
-  calibrate_clear();
-  // calibrate_offset(1.6, 30);
+  // calibrate_clear();
+  // calibrate_offset(1.6);
 
   /* USER CODE END 2 */
 
@@ -148,63 +148,23 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    printf("Encoder Reading: %u\r\n", motor_interface_get_position());
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 
-    // calibrate_single_electrical_rev(1, 12, 128);
-
-    // MotorSensorData data = motor_interface_get_data();
-    // if (data.valid) {
-    //   printf("Device Type %u Electrical Angle: %u\r\n", data.device_type, data.position);
-    // }
-
-    // printf("IA: %f\r\n", angle);
-
-    printf("CMD_UD: %.2f CMD_UQ: %.2f\r\n", foc_cmd.Ud, foc_cmd.Uq);
-    // printf("raw hex: 0x%08lx\r\n", *(uint32_t*)&foc_cmd.Ud);
+    // printf("CMD_UD: %.2f UD: %.2f CMD_UQ: %.2f UQ: %.2f\r\n", foc_cmd.ud, dq.id, foc_cmd.uq, dq.iq);
 
 
-
-    // printf("Electrical Angle: %u\r\n", motor_interface_get_position());
-    // printf("IREF CSA: %u IREF CSC: %u\r\n", current_ref_buf[0], current_ref_buf[1]);
-    // printf("CSA: %u CSC: %u\r\n", current_buf[0], current_buf[1]);
-
-    // uint8_t *raw = get_raw_uart();
-    // printf("Raw UART: [0x%02X] [0x%02X] [0x%02X] [0x%02X]\r\n", raw[0], raw[1], raw[2], raw[3]);
-
+    el_angle = el_angle + angled;
+    if (el_angle > PI2_F)
+    {
+      el_angle -= PI2_F;
+    }
     LL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-    // __HAL_HRTIM_SETPERIOD(&hhrtim1,
-    //                   HRTIM_TIMERINDEX_TIMER_A,
-    //                   count);
-    // uint32_t raw = motor_interface_get_position();
-    // angle = (raw);
-    // angle = angle / ENCODER_COUNTS * 2 * PI_F;
-
-    // angle = 315+22.5;
-    // angle = angle / 360 * 2 * PI_F;
-    // const DutyABC_t duty = open_loop_step(1.6, 0, angle, 30);
-    // write_duty(duty);
-    //
-    angle = angle + angled;
-    count ++;
-
-    HAL_Delay(1);
-
-    if (count % 100 == 0) {
-      if (angled < 0.1)
-      {
-        angled += 0.001;
-        printf("angled: %f\r\n", angled);
-      }
-    }
-    //
-    if (angle < (2 * PI_F)) {
-      angle = angle - (2 * PI_F);
-    }
 
     // LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
-    // HAL_Delay(100);
+    HAL_Delay(1);
   }
   /* USER CODE END 3 */
 }
