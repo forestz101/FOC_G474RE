@@ -117,7 +117,6 @@ int main(void)
   MX_ADC1_Init();
   MX_ADC2_Init();
   MX_ADC3_Init();
-  MX_COMP1_Init();
   MX_COMP3_Init();
   MX_DAC3_Init();
   MX_FDCAN2_Init();
@@ -137,8 +136,9 @@ int main(void)
   // float angle = 0;
   LL_GPIO_SetOutputPin(PHASE_EN_GPIO_Port, PHASE_EN_Pin);
   HAL_Delay(1);
-  foc_cmd.iq_ref = 5.0f;
-  foc_enable = 1;
+  // motor_interface_set_offset(12329-3000);
+  foc_cmd.iq_ref = 0.5f;
+  foc_enable = 0;
 
   // motor_interface_set_reverse(1);
 
@@ -154,16 +154,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // printf("Pos: %5u Rad: %.2f Raw: %5u \r\n",
+    // printf("EL_Pos: %5u EL_Rad: %.2f Raw: %5u \r\n",
     //   motor_interface_get_position(),
     //   motor_interface_get_position_rad(),
     //   motor_interface_get_position_raw()
     //   );
+    //
+    // printf("Ia: %.3f Ib: %.3f Ic: %.3f \r\n",
+    //   phase_currents.i_a,
+    //   phase_currents.i_b,
+    //   phase_currents.i_c
+    //   );
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-    printf("CMD_UD: %.2f UD: %.2f CMD_UQ: %.2f UQ: %.2f\r\n", foc_cmd.ud, dq.id, foc_cmd.uq, dq.iq);
+    float U_mag = sqrtf(dq.id*dq.id + dq.iq*dq.iq);
+    printf("CMD_UD: %3.2f UD: %3.2f CMD_UQ: %3.2f UQ: %3.2f UMAG: %3.2f\r\n", foc_cmd.ud, dq.id, foc_cmd.uq, dq.iq, U_mag);
 
 
     // el_angle = el_angle + angled;
@@ -172,12 +178,13 @@ int main(void)
     //   el_angle -= PI2_F;
     // }
     // LL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-    // foc_cmd.uq = 2.0f;
+    // foc_cmd.ud = 1.0f;
     // el_angle = motor_interface_get_position_rad();
+    // el_angle = 0;
     // OpenLoopStep();
 
     // LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
-    HAL_Delay(1);
+    HAL_Delay(100);
   }
   /* USER CODE END 3 */
 }
@@ -193,7 +200,7 @@ void SystemClock_Config(void)
 
   /** Configure the main internal regulator output voltage
   */
-  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1);
+  HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1_BOOST);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -204,7 +211,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV4;
-  RCC_OscInitStruct.PLL.PLLN = 50;
+  RCC_OscInitStruct.PLL.PLLN = 85;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -222,7 +229,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
     Error_Handler();
   }

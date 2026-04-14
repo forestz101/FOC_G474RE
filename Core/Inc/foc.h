@@ -19,7 +19,7 @@
 #define CC6922SG_SENS 0.0132f   // 13.2 mV/A
 
 // Control loop period length
-#define CONTROL_DT (1.0f / 20753.0f)
+#define CONTROL_DT (1.0f / 5200.0f)
 #define PWM_PERIOD 65534    // 0xFFFF - 1
 
 #ifndef FOC_H

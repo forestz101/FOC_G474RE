@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include "foc.h"
 #include "motor_interface.h"
+#include "stm32g4xx_hal_hrtim.h"
 #include "stm32g4xx_ll_dma.h"
 #include "stm32g4xx_ll_gpio.h"
 #include "stm32g4xx_ll_hrtim.h"
@@ -71,7 +72,6 @@ void process_uart_command(const char *cmd)
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern DMA_HandleTypeDef hdma_adc1;
 extern HRTIM_HandleTypeDef hhrtim1;
 /* USER CODE BEGIN EV */
 
@@ -216,38 +216,29 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief This function handles DMA1 channel2 global interrupt.
-  */
-void DMA1_Channel2_IRQHandler(void)
-{
-  /* USER CODE BEGIN DMA1_Channel2_IRQn 0 */
-  // LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
-  // LL_GPIO_TogglePin(GPO1_GPIO_Port, GPO1_Pin);
-  /* USER CODE END DMA1_Channel2_IRQn 0 */
-  /* USER CODE BEGIN DMA1_Channel2_IRQn 1 */
-  LL_DMA_ClearFlag_GI2(DMA1);
-  /* USER CODE END DMA1_Channel2_IRQn 1 */
-}
-
-/**
   * @brief This function handles HRTIM master timer global interrupt.
   */
 void HRTIM1_Master_IRQHandler(void)
 {
   /* USER CODE BEGIN HRTIM1_Master_IRQn 0 */
-  // Clear the Master Update interrupt flag
   LL_GPIO_SetOutputPin(GPO1_GPIO_Port, GPO1_Pin);
   __HAL_HRTIM_MASTER_CLEAR_IT(&hhrtim1, HRTIM_MASTER_IT_MUPD);
   if (foc_enable)
   {
     el_angle = motor_interface_get_position_rad();
+    // el_angle = el_angle + 0.001;
     FOC_Step(CONTROL_DT);
+  } else
+  {
+    el_angle = motor_interface_get_position_rad();
+    foc_cmd.uq = 3.0f;
+    OpenLoopStep();
   }
-
   LL_GPIO_ResetOutputPin(GPO1_GPIO_Port, GPO1_Pin);
 
   /* USER CODE END HRTIM1_Master_IRQn 0 */
   /* USER CODE BEGIN HRTIM1_Master_IRQn 1 */
+
   /* USER CODE END HRTIM1_Master_IRQn 1 */
 }
 

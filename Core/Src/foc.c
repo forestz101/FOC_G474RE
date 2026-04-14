@@ -15,16 +15,16 @@ foc_commands_t foc_cmd = {
 };
 
 pi_t pi_d = {
-    .kp = 3.0f,
-    .ki = 0.3f,
+    .kp = 0.5f,
+    .ki = 5.0f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
 };
 
 pi_t pi_q = {
-    .kp = 3.0f,
-    .ki = 0.3f,
+    .kp = 0.5f,
+    .ki = 10.0f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
@@ -90,9 +90,14 @@ void GetPhaseCurrents()
 {
     const int16_t a_diff = (int16_t)(current_buf[0] - current_ref_buf[0]);
     const int16_t c_diff = (int16_t)(current_buf[1] - current_ref_buf[1]);
+    const float alpha = 1.0f;
+
+    // phase_currents.i_a += alpha * ((float)a_diff * current_scale - phase_currents.i_a);
+    // phase_currents.i_c += alpha * ((float)c_diff * current_scale * -1 - phase_currents.i_c);    // C-phase sensor polarity reversed
 
     phase_currents.i_a = (float)a_diff * current_scale;
     phase_currents.i_c = (float)c_diff * current_scale * -1;    // C-phase sensor polarity reversed
+    phase_currents.i_b = -(phase_currents.i_a + phase_currents.i_c);
     phase_currents.i_b = -(phase_currents.i_a + phase_currents.i_c);
 }
 
@@ -110,8 +115,10 @@ void ClarkeTransform()
 
 void ParkTransform()
 {
-    dq.id =  alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta;
-    dq.iq = -alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta;
+    const float alpha = 0.0001f;
+
+    dq.id += alpha * ((alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta) - dq.id);
+    dq.iq += alpha * ((-alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta) - dq.iq);
 }
 
 void InversePark()
@@ -133,21 +140,25 @@ void ComputePWMDuty()
     duty.d_b = v_abc.v_b / vbus + 0.5f;
     duty.d_c = v_abc.v_c / vbus + 0.5f;
 
-    if (duty.d_a < 0.03f) duty.d_a = 0.03f;
-    if (duty.d_b < 0.03f) duty.d_b = 0.03f;
-    if (duty.d_c < 0.03f) duty.d_c = 0.03f;
+    if (duty.d_a < 0.01f) duty.d_a = 0.005f;
+    if (duty.d_b < 0.01f) duty.d_b = 0.005f;
+    if (duty.d_c < 0.01f) duty.d_c = 0.005f;
 
-    if (duty.d_a > 0.97f) duty.d_a = 0.97f;
-    if (duty.d_b > 0.97f) duty.d_b = 0.97f;
-    if (duty.d_c > 0.97f) duty.d_c = 0.97f;
+    if (duty.d_a > 0.99f) duty.d_a = 0.995f;
+    if (duty.d_b > 0.99f) duty.d_b = 0.995f;
+    if (duty.d_c > 0.99f) duty.d_c = 0.995f;
 
 }
 
 void WriteDuty()
 {
-    const uint16_t a_counts = (uint16_t)(duty.d_a * PWM_PERIOD);
-    const uint16_t b_counts = (uint16_t)(duty.d_b * PWM_PERIOD);
-    const uint16_t c_counts = (uint16_t)(duty.d_c * PWM_PERIOD);
+    uint16_t a_counts = (uint16_t)(duty.d_a * PWM_PERIOD);
+    uint16_t b_counts = (uint16_t)(duty.d_b * PWM_PERIOD);
+    uint16_t c_counts = (uint16_t)(duty.d_c * PWM_PERIOD);
+
+    // if (a_counts < 500) a_counts = 10;
+    // if (b_counts < 500) b_counts = 10;
+    // if (c_counts < 500) c_counts = 10;
 
     __HAL_HRTIM_SETCOMPARE(&hhrtim1,
                       HRTIM_TIMERINDEX_TIMER_B,
