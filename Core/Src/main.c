@@ -135,12 +135,15 @@ int main(void)
   float angled = 0.01;
   // float angle = 0;
   LL_GPIO_SetOutputPin(PHASE_EN_GPIO_Port, PHASE_EN_Pin);
-  HAL_Delay(1);
+  // foc_enable = 2;
+  // HAL_Delay(10000);
   // motor_interface_set_offset(12329-3000);
-  foc_cmd.iq_ref = 0.5f;
-  foc_enable = 0;
+
 
   // motor_interface_set_reverse(1);
+
+  // foc_enable = 0;
+
 
   // calibrate(1.6, 30);
   // calibrate_clear();
@@ -148,17 +151,20 @@ int main(void)
   // motor_interface_set_offset(12329);
   // motor_interface_save_calibration();
 
+  foc_cmd.iq_ref = 0.8f;
+  foc_enable = 2;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // printf("EL_Pos: %5u EL_Rad: %.2f Raw: %5u \r\n",
-    //   motor_interface_get_position(),
-    //   motor_interface_get_position_rad(),
-    //   motor_interface_get_position_raw()
-    //   );
+    printf("EL_Pos: %5u EL_Rad: %.2f Raw: %5u \r\n",
+      motor_interface_get_position(),
+      motor_interface_get_position_rad(),
+      motor_interface_get_position_raw()
+      );
     //
     // printf("Ia: %.3f Ib: %.3f Ic: %.3f \r\n",
     //   phase_currents.i_a,

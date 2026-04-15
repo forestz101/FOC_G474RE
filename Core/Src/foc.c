@@ -2,7 +2,7 @@
 #include <math.h>
 #include "hrtim.h"
 
-float vbus = 20;
+float vbus = 30;
 float el_angle = 0;
 float current_scale = ADC_SCALE / CC6922SG_SENS;
 uint8_t foc_enable = 0;
@@ -15,16 +15,16 @@ foc_commands_t foc_cmd = {
 };
 
 pi_t pi_d = {
-    .kp = 0.5f,
-    .ki = 5.0f,
+    .kp = 1.0f,
+    .ki = 200.0f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
 };
 
 pi_t pi_q = {
-    .kp = 0.5f,
-    .ki = 10.0f,
+    .kp = 1.0f,
+    .ki = 200.0f,
     .integrator = 0.0f,
     .out_min = 0.0f,    // set in init
     .out_max = 0.0f     // set in init
@@ -83,21 +83,20 @@ void foc_init()
     pi_q.out_max =  vmax;
 
     foc_cmd.id_ref = 0.0f;
-    foc_cmd.iq_ref = .0f;
+    foc_cmd.iq_ref = 0.0f;
 }
 
 void GetPhaseCurrents()
 {
     const int16_t a_diff = (int16_t)(current_buf[0] - current_ref_buf[0]);
     const int16_t c_diff = (int16_t)(current_buf[1] - current_ref_buf[1]);
-    const float alpha = 1.0f;
 
+    // const float alpha = 0.2f;
     // phase_currents.i_a += alpha * ((float)a_diff * current_scale - phase_currents.i_a);
     // phase_currents.i_c += alpha * ((float)c_diff * current_scale * -1 - phase_currents.i_c);    // C-phase sensor polarity reversed
 
     phase_currents.i_a = (float)a_diff * current_scale;
     phase_currents.i_c = (float)c_diff * current_scale * -1;    // C-phase sensor polarity reversed
-    phase_currents.i_b = -(phase_currents.i_a + phase_currents.i_c);
     phase_currents.i_b = -(phase_currents.i_a + phase_currents.i_c);
 }
 
@@ -115,10 +114,12 @@ void ClarkeTransform()
 
 void ParkTransform()
 {
-    const float alpha = 0.0001f;
+    dq.id = alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta;
+    dq.iq = -alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta;
 
-    dq.id += alpha * ((alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta) - dq.id);
-    dq.iq += alpha * ((-alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta) - dq.iq);
+    // const float alpha = 0.5f;
+    // dq.id += alpha * ((alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta) - dq.id);
+    // dq.iq += alpha * ((-alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta) - dq.iq);
 }
 
 void InversePark()
