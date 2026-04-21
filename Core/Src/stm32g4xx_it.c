@@ -236,7 +236,7 @@ void HRTIM1_Master_IRQHandler(void)
     {
       el_angle -= PI2_F;
     };
-    foc_cmd.uq = 2.0f;
+    foc_cmd.uq = 20.0f;
     OpenLoopStep();
   }
   LL_GPIO_ResetOutputPin(GPO1_GPIO_Port, GPO1_Pin);

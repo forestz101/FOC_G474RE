@@ -129,7 +129,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   motor_interface_init();
   start_adc();
-  foc_init();
+  FOCInit();
   start_hrtim();
   uint16_t count = 0;
   float angled = 0.01;

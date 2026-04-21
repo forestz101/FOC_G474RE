@@ -93,12 +93,13 @@ extern float el_angle;
 extern uint8_t foc_enable;
 
 // Public API
-void foc_init();
+void FOCInit();
+void ComputeSVPWMCoeffs();
 void GetPhaseCurrents();
 void ClarkeTransform();
 void ParkTransform();
 void InversePark();
-float PI_Run(pi_t *pi, float error, float dt);
+float ComputePI(pi_t *pi, float error, float dt);
 void FOC_Step(float dt);
 void OpenLoopStep();
 
