@@ -129,30 +129,20 @@ int main(void)
   /* USER CODE BEGIN 2 */
   motor_interface_init();
   start_adc();
-  FOCInit();
+  mc_init();
   start_hrtim();
-  uint16_t count = 0;
-  float angled = 0.01;
-  // float angle = 0;
   LL_GPIO_SetOutputPin(PHASE_EN_GPIO_Port, PHASE_EN_Pin);
-  // foc_enable = 2;
-  // HAL_Delay(10000);
-  // motor_interface_set_offset(12329-3000);
-
+  HAL_Delay(1);
+  mc.cmd.iq_ref = 0.5f;
+  mc.mode = MC_DISABLED;
 
   // motor_interface_set_reverse(1);
-
-  // foc_enable = 0;
-
 
   // calibrate(1.6, 30);
   // calibrate_clear();
   // calibrate_offset(1.6, 256 ,500);
   // motor_interface_set_offset(12329);
   // motor_interface_save_calibration();
-
-  foc_cmd.iq_ref = 0.8f;
-  foc_enable = 2;
 
   /* USER CODE END 2 */
 
@@ -174,8 +164,10 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    float U_mag = sqrtf(dq.id*dq.id + dq.iq*dq.iq);
-    printf("CMD_UD: %3.2f UD: %3.2f CMD_UQ: %3.2f UQ: %3.2f UMAG: %3.2f\r\n", foc_cmd.ud, dq.id, foc_cmd.uq, dq.iq, U_mag);
+    float U_mag = sqrtf(mc.dq.id*mc.dq.id + mc.dq.iq*mc.dq.iq);
+    printf("UD: %3.2f ID: %3.2f UQ: %3.2f IQ: %3.2f UMAG: %3.2f | TH: %3.2f W: %3.1f G: %3.2f\r\n",
+           mc.cmd.ud, mc.dq.id, mc.cmd.uq, mc.dq.iq, U_mag,
+           mc.observer.theta_est, mc.observer.omega_est, mc.observer.correction_gain);
 
 
     // el_angle = el_angle + angled;

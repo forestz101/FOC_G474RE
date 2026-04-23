@@ -2,96 +2,20 @@
 #include <math.h>
 #include "hrtim.h"
 
-float vbus = 30;
-float vmax;
-float el_angle = 0;
-float current_scale = ADC_SCALE / CC6922SG_SENS;
-float svpwm_coeffs[6][4] = {0}; // SVPWM coeffs, computed at init
-uint8_t foc_enable = 0;
-
-foc_commands_t foc_cmd = {
-    .id_ref = 0.0f,
-    .iq_ref = 0.0f,
-    .ud = 0.0f,
-    .uq = 0.0f
+motor_controller_t mc = {
+    .vbus          = 30.0f,
+    .mode          = MC_DISABLED,
+    .el_angle      = 0.0f,
+    .current_scale = ADC_SCALE / CC6922SG_SENS,
 };
 
-pi_t pi_d = {
-    .kp = 1.0f,
-    .ki = 200.0f,
-    .integrator = 0.0f,
-    .out_min = 0.0f,    // set in init
-    .out_max = 0.0f     // set in init
-};
-
-pi_t pi_q = {
-    .kp = 1.0f,
-    .ki = 200.0f,
-    .integrator = 0.0f,
-    .out_min = 0.0f,    // set in init
-    .out_max = 0.0f     // set in init
-};
-
-phase_currents_t phase_currents = {
-    .i_a = 0.0f,
-    .i_b = 0.0f,
-    .i_c = 0.0f
-};
-
-foc_trig_t foc_trig = {
-    .sin_theta = 0.0f,
-    .cos_theta = 0.0f
-};
-
-volt_alpha_beta_t volt_ab = {
-    .v_alpha = 0.0f,
-    .v_beta = 0.0f
-};
-
-alpha_beta_t alpha_beta = {
-    .i_alpha = 0.0f,
-    .i_beta = 0.0f
-};
-
-direct_quadrature_t dq = {
-    .id = 0.0f,
-    .iq = 0.0f
-};
-
-v_abc_t v_abc = {
-    .v_a = 0.0f,
-    .v_b = 0.0f,
-    .v_c = 0.0f
-};
-
-duty_t duty = {
-    .d_a = 0.0f,
-    .d_b = 0.0f,
-    .d_c = 0.0f
-};
-
+static float svpwm_coeffs[6][4] = {0}; // SVPWM coeffs, computed at init
 
 // PhaseCurrents_t phase_currents;
 volatile uint16_t current_buf[2] = {0}; // [CSA, CSC]
 volatile uint16_t current_ref_buf[2] = {0}; // [CSA REF, CSC REF]
 
-void FOCInit()
-{
-    vmax = vbus * INVERSE_SQRT3_F;
-
-    pi_d.out_min = -vmax;
-    pi_d.out_max =  vmax;
-
-    pi_q.out_min = -vmax;
-    pi_q.out_max =  vmax;
-
-    foc_cmd.id_ref = 0.0f;
-    foc_cmd.iq_ref = 0.0f;
-
-    ComputeSVPWMCoeffs();
-}
-
-void ComputeSVPWMCoeffs(void)
+static void compute_svpwm_coeffs(void)
 {
     // SVPWM: compute coeffs variable coeffs[6][4]
     // Each coeffs[s][0..3] = { A, B, C, D } where
@@ -119,69 +43,97 @@ void ComputeSVPWMCoeffs(void)
     }
 }
 
-void GetPhaseCurrents()
+void mc_init(void)
+{
+    const float vmax = mc.vbus * INVERSE_SQRT3_F;
+
+    mc.pi_d.kp      = 1.0f;
+    mc.pi_d.ki      = 200.0f;
+    mc.pi_d.out_min = -vmax;
+    mc.pi_d.out_max =  vmax;
+
+    mc.pi_q.kp      = 1.0f;
+    mc.pi_q.ki      = 200.0f;
+    mc.pi_q.out_min = -vmax;
+    mc.pi_q.out_max =  vmax;
+
+    mc.cmd.id_ref = 0.0f;
+    mc.cmd.iq_ref = 0.0f;
+
+    compute_svpwm_coeffs();
+    observer_init(&mc.observer, MOTOR_RS, MOTOR_LS, MOTOR_FLUX_LINKAGE);
+}
+
+static void GetPhaseCurrents(void)
 {
     const int16_t a_diff = (int16_t)(current_buf[0] - current_ref_buf[0]);
     const int16_t c_diff = (int16_t)(current_buf[1] - current_ref_buf[1]);
 
     const float alpha = 0.5f;
-    phase_currents.i_a += alpha * ((float)a_diff * current_scale - phase_currents.i_a);
-    phase_currents.i_c += alpha * ((float)c_diff * current_scale * -1 - phase_currents.i_c);    // C-phase sensor polarity reversed
+    mc.phase_currents.i_a += alpha * ((float)a_diff * mc.current_scale - mc.phase_currents.i_a);
+    mc.phase_currents.i_c += alpha * ((float)c_diff * mc.current_scale * -1.0f - mc.phase_currents.i_c);    // C-phase sensor polarity reversed
 
-    // phase_currents.i_a = (float)a_diff * current_scale;
-    // phase_currents.i_c = (float)c_diff * current_scale * -1;    // C-phase sensor polarity reversed
+    // mc.phase_currents.i_a = (float)a_diff * mc.current_scale;
+    // mc.phase_currents.i_c = (float)c_diff * mc.current_scale * -1.0f;    // C-phase sensor polarity reversed
 
-    phase_currents.i_b = -(phase_currents.i_a + phase_currents.i_c);
+    mc.phase_currents.i_b = -(mc.phase_currents.i_a + mc.phase_currents.i_c);
 }
 
-void CalculateFOCTrig()
+static void CalculateFOCTrig(void)
 {
-    foc_trig.sin_theta = sinf(el_angle);
-    foc_trig.cos_theta = cosf(el_angle);
+    mc.trig.sin_theta = sinf(mc.el_angle);
+    mc.trig.cos_theta = cosf(mc.el_angle);
 }
 
-void ClarkeTransform()
+static void ClarkeTransform(void)
 {
-    alpha_beta.i_alpha = phase_currents.i_a;
-    alpha_beta.i_beta  = phase_currents.i_a * INVERSE_SQRT3_F + phase_currents.i_b * INVERSE_2SQRT3_F;
+    mc.alpha_beta.i_alpha = mc.phase_currents.i_a;
+    mc.alpha_beta.i_beta  = mc.phase_currents.i_a * INVERSE_SQRT3_F
+                          + mc.phase_currents.i_b * INVERSE_2SQRT3_F;
 }
 
-void ParkTransform()
+static void ParkTransform(void)
 {
-    dq.id = alpha_beta.i_alpha * foc_trig.cos_theta + alpha_beta.i_beta * foc_trig.sin_theta;
-    dq.iq = -alpha_beta.i_alpha * foc_trig.sin_theta + alpha_beta.i_beta * foc_trig.cos_theta;
+    mc.dq.id =  mc.alpha_beta.i_alpha * mc.trig.cos_theta
+              + mc.alpha_beta.i_beta  * mc.trig.sin_theta;
+    mc.dq.iq = -mc.alpha_beta.i_alpha * mc.trig.sin_theta
+              + mc.alpha_beta.i_beta  * mc.trig.cos_theta;
 }
 
-void InversePark()
+static void InversePark(void)
 {
-    volt_ab.v_alpha = foc_cmd.ud * foc_trig.cos_theta - foc_cmd.uq * foc_trig.sin_theta;
-    volt_ab.v_beta  = foc_cmd.ud * foc_trig.sin_theta + foc_cmd.uq * foc_trig.cos_theta;
+    mc.volt_ab.v_alpha = mc.cmd.ud * mc.trig.cos_theta
+                       - mc.cmd.uq * mc.trig.sin_theta;
+    mc.volt_ab.v_beta  = mc.cmd.ud * mc.trig.sin_theta
+                       + mc.cmd.uq * mc.trig.cos_theta;
 
     // Clamp to circle: |V| <= Vbus/sqrt(3)
-    const float mag_sq = volt_ab.v_alpha * volt_ab.v_alpha + volt_ab.v_beta * volt_ab.v_beta;
+    const float vmax = mc.vbus * INVERSE_SQRT3_F;
+    const float mag_sq = mc.volt_ab.v_alpha * mc.volt_ab.v_alpha
+                       + mc.volt_ab.v_beta  * mc.volt_ab.v_beta;
     const float vmax_sq = vmax * vmax;
 
     if (mag_sq > vmax_sq) {
         // Fast inverse sqrt approximation (Quake algorithm)
         float inv_mag = 1.0f / sqrtf(mag_sq);
-        volt_ab.v_alpha *= vmax * inv_mag;
-        volt_ab.v_beta *= vmax * inv_mag;
+        mc.volt_ab.v_alpha *= vmax * inv_mag;
+        mc.volt_ab.v_beta  *= vmax * inv_mag;
     }
 }
 
-void InverseClarke()
+static void InverseClarke(void)
 {
-    v_abc.v_a = volt_ab.v_alpha;
-    v_abc.v_b = (-volt_ab.v_alpha + SQRT3_F * volt_ab.v_beta) / 2;
-    v_abc.v_c = (-volt_ab.v_alpha - SQRT3_F * volt_ab.v_beta) / 2;
+    mc.v_abc.v_a = mc.volt_ab.v_alpha;
+    mc.v_abc.v_b = (-mc.volt_ab.v_alpha + SQRT3_F * mc.volt_ab.v_beta) / 2.0f;
+    mc.v_abc.v_c = (-mc.volt_ab.v_alpha - SQRT3_F * mc.volt_ab.v_beta) / 2.0f;
 }
 
-void SVPWM()
+static void svpwm(void)
 {
     // Convert alpha-beta to normalized reference vector (relative to Vdc/2)
-    const float vbus_half = vbus * 0.5f;
-    const float a = volt_ab.v_alpha / vbus_half;
-    const float b = volt_ab.v_beta  / vbus_half;
+    const float vbus_half = mc.vbus * 0.5f;
+    const float a = mc.volt_ab.v_alpha / vbus_half;
+    const float b = mc.volt_ab.v_beta  / vbus_half;
 
     // sector detection (projections)
     float wX = b;
@@ -252,31 +204,31 @@ void SVPWM()
         break;
     }
 
-    duty.d_a = Ta_frac;
-    duty.d_b = Tb_frac;
-    duty.d_c = Tc_frac;
+    mc.duty.d_a = Ta_frac;
+    mc.duty.d_b = Tb_frac;
+    mc.duty.d_c = Tc_frac;
 }
 
-void ComputePWMDuty()
+static void ComputePWMDuty(void)
 {
-    duty.d_a = v_abc.v_a / vbus + 0.5f;
-    duty.d_b = v_abc.v_b / vbus + 0.5f;
-    duty.d_c = v_abc.v_c / vbus + 0.5f;
+    mc.duty.d_a = mc.v_abc.v_a / mc.vbus + 0.5f;
+    mc.duty.d_b = mc.v_abc.v_b / mc.vbus + 0.5f;
+    mc.duty.d_c = mc.v_abc.v_c / mc.vbus + 0.5f;
 
-    if (duty.d_a < 0.01f) duty.d_a = 0.005f;
-    if (duty.d_b < 0.01f) duty.d_b = 0.005f;
-    if (duty.d_c < 0.01f) duty.d_c = 0.005f;
+    if (mc.duty.d_a < 0.01f) mc.duty.d_a = 0.005f;
+    if (mc.duty.d_b < 0.01f) mc.duty.d_b = 0.005f;
+    if (mc.duty.d_c < 0.01f) mc.duty.d_c = 0.005f;
 
-    if (duty.d_a > 0.99f) duty.d_a = 0.995f;
-    if (duty.d_b > 0.99f) duty.d_b = 0.995f;
-    if (duty.d_c > 0.99f) duty.d_c = 0.995f;
+    if (mc.duty.d_a > 0.99f) mc.duty.d_a = 0.995f;
+    if (mc.duty.d_b > 0.99f) mc.duty.d_b = 0.995f;
+    if (mc.duty.d_c > 0.99f) mc.duty.d_c = 0.995f;
 }
 
-void WriteDuty()
+static void WriteDuty(void)
 {
-    uint16_t a_counts = (uint16_t)(duty.d_a * PWM_PERIOD);
-    uint16_t b_counts = (uint16_t)(duty.d_b * PWM_PERIOD);
-    uint16_t c_counts = (uint16_t)(duty.d_c * PWM_PERIOD);
+    uint16_t a_counts = (uint16_t)(mc.duty.d_a * PWM_PERIOD);
+    uint16_t b_counts = (uint16_t)(mc.duty.d_b * PWM_PERIOD);
+    uint16_t c_counts = (uint16_t)(mc.duty.d_c * PWM_PERIOD);
 
     __HAL_HRTIM_SETCOMPARE(&hhrtim1,
                       HRTIM_TIMERINDEX_TIMER_B,
@@ -292,7 +244,7 @@ void WriteDuty()
                       c_counts);
 }
 
-float ComputePI(pi_t *pi, float error, float dt)
+float pi_run(pi_t *pi, float error, float dt)
 {
     const float P = pi->kp * error;
     const float ki_dt = pi->ki * dt;
@@ -314,33 +266,42 @@ float ComputePI(pi_t *pi, float error, float dt)
     return out;
 }
 
-void FOC_Step(const float dt)
+void foc_step(const float dt, float encoder_el_angle)
 {
-    // float angle = getAngle();
     GetPhaseCurrents();
-    CalculateFOCTrig();
     ClarkeTransform();
+
+    observer_step(&mc.observer,
+                  mc.alpha_beta.i_alpha, mc.alpha_beta.i_beta,
+                  encoder_el_angle, dt);
+    mc.el_angle = mc.observer.theta_est;
+
+    CalculateFOCTrig();
     ParkTransform();
 
-    const float err_d = foc_cmd.id_ref - dq.id;
-    const float err_q = foc_cmd.iq_ref - dq.iq;
+    const float err_d = mc.cmd.id_ref - mc.dq.id;
+    const float err_q = mc.cmd.iq_ref - mc.dq.iq;
 
-    foc_cmd.ud = ComputePI(&pi_d, err_d, dt);
-    foc_cmd.uq = ComputePI(&pi_q, err_q, dt);
+    mc.cmd.ud = pi_run(&mc.pi_d, err_d, dt);
+    mc.cmd.uq = pi_run(&mc.pi_q, err_q, dt);
 
     InversePark();
+
+    observer_update_voltage(&mc.observer,
+                            mc.volt_ab.v_alpha, mc.volt_ab.v_beta);
+
     // InverseClarke();
     // ComputePWMDuty();
-    SVPWM();
+    svpwm();
     WriteDuty();
 }
 
-void OpenLoopStep()
+void open_loop_step(void)
 {
     CalculateFOCTrig();
     InversePark();
     // InverseClarke();
     // ComputePWMDuty();
-    SVPWM();
+    svpwm();
     WriteDuty();
 }

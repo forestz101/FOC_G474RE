@@ -223,21 +223,15 @@ void HRTIM1_Master_IRQHandler(void)
   /* USER CODE BEGIN HRTIM1_Master_IRQn 0 */
   LL_GPIO_SetOutputPin(GPO1_GPIO_Port, GPO1_Pin);
   __HAL_HRTIM_MASTER_CLEAR_IT(&hhrtim1, HRTIM_MASTER_IT_MUPD);
-  if (foc_enable == 1)
+  if (mc.mode == MC_FOC)
   {
-    el_angle = motor_interface_get_position_rad();
-    // el_angle = el_angle + 0.001;
-    FOC_Step(CONTROL_DT);
-  } else if (foc_enable == 2)
+    float enc_el = motor_interface_get_position_rad();
+    foc_step(CONTROL_DT, enc_el);
+  } else if (mc.mode == MC_OPEN_LOOP)
   {
-    // el_angle = motor_interface_get_position_rad();
-    el_angle = el_angle + 0.0012;
-    if (el_angle > PI2_F)
-    {
-      el_angle -= PI2_F;
-    };
-    foc_cmd.uq = 20.0f;
-    OpenLoopStep();
+    mc.el_angle = motor_interface_get_position_rad();
+    mc.cmd.uq = 3.0f;
+    open_loop_step();
   }
   LL_GPIO_ResetOutputPin(GPO1_GPIO_Port, GPO1_Pin);
 

@@ -17,10 +17,10 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "motor_interface.h"
+#include "math_defs.h"
 #include <stdio.h>
 #include "usart.h"
 #include "dma.h"
-#include "foc.h"
 #include "stm32g4xx_ll_usart.h"
 #include "stm32g4xx_ll_dma.h"
 
@@ -28,11 +28,10 @@ static uint8_t  ws22_dma_buf[WS22_DMA_BUF_SIZE];
 static MotorSensorData currentData = {0};
 static uint16_t encoder_offset = 0;
 static uint8_t reverse_direction = 0;
-static int16_t encoder_lut[LUT_SIZE] = {0};
 static uint8_t lut_valid = 0;
+static int16_t encoder_lut[LUT_SIZE] = {0};
 
 #include "stm32g4xx_hal.h"
-
 
 typedef struct {
   uint16_t offset;
@@ -40,8 +39,6 @@ typedef struct {
   uint8_t  lut_valid;
   int16_t  lut[LUT_SIZE];
 } EncoderCalData;
-
-static int16_t encoder_lut[LUT_SIZE];
 
 /**
   * @brief  Initialize motor interface
